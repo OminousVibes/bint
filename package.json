@@ -1,0 +1,49 @@
+{
+  "name": "@rbxts/bint",
+  "version": "0.1.0",
+  "description": "Arbitrary-precision signed integer library for Luau with operator support, multiple algorithms, and TypeScript typings.",
+  "main": "src/init.luau",
+  "scripts": {
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src/index.d.ts",
+    "test": "lune run libs/specs",
+    "pack:check": "npm pack --dry-run"
+  },
+  "keywords": [
+    "luau",
+    "bigint",
+    "arbitrary-precision",
+    "roblox",
+    "rbxts"
+  ],
+  "author": "OminousVibes",
+  "license": "MIT",
+  "type": "commonjs",
+  "types": "src/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OminousVibes/bint.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OminousVibes/bint/issues"
+  },
+  "homepage": "https://github.com/OminousVibes/bint#readme",
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@rbxts/compiler-types": "^3.0.0-types.0",
+    "@rbxts/types": "^1.0.908",
+    "@typescript-eslint/eslint-plugin": "^8.56.0",
+    "@typescript-eslint/parser": "^8.56.0",
+    "eslint": "^9.39.3",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-roblox-ts": "^1.3.1",
+    "prettier": "^3.8.1",
+    "roblox-ts": "^3.0.0",
+    "typescript": "^5.9.3"
+  }
+}
