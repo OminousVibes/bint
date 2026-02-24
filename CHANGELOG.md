@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] - 2026-02-24
+
+### Changed
+
+- Internal limb add/sub helpers were refactored to use explicit mutating helpers (`add_limbs_mut` / `sub_limbs_mut`) instead of `in_place` flags, simplifying call sites and making mutation intent clearer.
+- Limb addition/subtraction hot paths now use numeric split loops for carry/borrow handling, improving performance without changing public API behavior.
+
 ## [0.2.1] - 2026-02-24
 
 ### Changed

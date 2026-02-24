@@ -1,6 +1,6 @@
 {
   "name": "@rbxts/bint",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Arbitrary-precision signed integer library for Luau with operator support, multiple algorithms, and TypeScript typings.",
   "main": "src/init.luau",
   "scripts": {

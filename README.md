@@ -4,7 +4,9 @@ Arbitrary-precision signed integer library for Luau.
 
 `bint` stores integers as little-endian base-`2^24` limbs, so values can grow without fixed-width overflow. It supports idiomatic operators (`+`, `-`, `*`, `//`, `%`, `^`, comparisons), plus a lower-level `core` API with mutating and non-mutating functions.
 
-Latest release: `0.2.1`.
+`v0.2.2` is a maintenance/performance release focused on internal limb add/sub refactors and faster carry/borrow loops, with no public API changes.
+
+Latest release: `0.2.2`.
 
 ## Features
 
