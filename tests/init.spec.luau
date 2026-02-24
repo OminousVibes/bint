@@ -1,11 +1,16 @@
 --!nocheck
+--!nolint IntegerParsing
 
 return function(t)
 	local describe, it, expect = t.describe, t.it, t.expect
 	local mod = require("../src")
 	local bint = mod.bint
 	local core = mod.core
+	local algorithms = mod.algorithms
 	local BASE = 2 ^ 24
+	local TAG_FAST = {"fast", "full", "stress"}
+	local TAG_FULL = {"full", "stress"}
+	local TAG_STRESS = {"stress"}
 
 	local function S(x)
 		return bint.tostring(x)
@@ -173,7 +178,7 @@ return function(t)
 
 	describe("bint comprehensive", function()
 		--## Constructors and validation
-		describe("constructors and validation", function()
+		describe.tags(TAG_FAST, "constructors and validation", function()
 			it("from_int should handle regular signed values", function()
 				expect(S(bint.from_int(0))).to.equal("0")
 				expect(S(bint.from_int(1))).to.equal("1")
@@ -287,7 +292,7 @@ return function(t)
 		end)
 
 		--## Comparison and sign helpers
-		describe("comparison and sign helpers", function()
+		describe.tags(TAG_FAST, "comparison and sign helpers", function()
 			it("cmp/eq/lt/le should match native integer ordering on a dense grid", function()
 				for a = -40, 40 do
 					for b = -40, 40 do
@@ -374,7 +379,7 @@ return function(t)
 		end)
 
 		--## Core arithmetic
-		describe("core arithmetic", function()
+		describe.tags(TAG_FULL, "core arithmetic", function()
 			it("add/sub/mul should match native math on dense small integers", function()
 				for a = -60, 60 do
 					for b = -60, 60 do
@@ -426,7 +431,7 @@ return function(t)
 
 		--## Division semantics
 		-- Dense grids for floor and truncated division; error handling for /0 and bare /.
-		describe("division semantics", function()
+		describe.tags(TAG_FULL, "division semantics", function()
 			it("floor and truncated division should match integer formulas on dense grids", function()
 				for a = -90, 90 do
 					for b = -25, 25 do
@@ -473,7 +478,7 @@ return function(t)
 		end)
 
 		--## Pow and sqrt
-		describe("pow and sqrt", function()
+		describe.tags(TAG_FAST, "pow and sqrt", function()
 			it("pow should handle zero exponent and reject negative exponent", function()
 				expect(S(core.pow(bint("-123"), bint.zero()))).to.equal("1")
 				expect(function()
@@ -511,7 +516,7 @@ return function(t)
 		end)
 
 		--## String and base conversion
-		describe("string/base conversion", function()
+		describe.tags(TAG_FULL, "string/base conversion", function()
 			it("tostring/from_string should round-trip across bases for many values", function()
 				local bases = { 2, 3, 8, 10, 16, 36 }
 				local samples = {
@@ -588,7 +593,7 @@ return function(t)
 
 		--## Byte conversion
 		-- Magnitude-only little/big-endian serialisation and deserialisation.
-		describe("byte conversion", function()
+		describe.tags(TAG_FULL, "byte conversion", function()
 			it("tole/fromle and tobe/frombe should round-trip magnitudes", function()
 				local samples = {
 					bint("0"),
@@ -653,7 +658,7 @@ return function(t)
 		end)
 
 			--## Tonumber and bit/word shifts
-			describe("tonumber and shifts", function()
+			describe.tags(TAG_FULL, "tonumber and shifts", function()
 			it("tonumber should be exact up to 2^53 and return number type for bigger values", function()
 				expect(bint.tonumber(bint("9007199254740991"))).to.equal(9007199254740991)
 				expect(bint.tonumber(bint("9007199254740992"))).to.equal(9007199254740992)
@@ -813,7 +818,7 @@ return function(t)
 
 			--## Algorithm path coverage
 			-- Exercises basecase/Karatsuba/Toom-3 mul and Knuth/Burnikel-Ziegler div paths directly.
-			describe("algorithm path coverage", function()
+			describe.tags(TAG_FAST, "algorithm path coverage", function()
 				it("division path: knuth-sized operands should satisfy floor/trunc invariants", function()
 					local a = make_big(300, 97, -1)
 					local b = make_big(300, 131, 1)
@@ -873,7 +878,7 @@ return function(t)
 
 		--## Large-number invariants
 		-- Randomised arithmetic, division, and algebraic identities at ~12-limb and ~100-limb scale.
-		describe("large-number invariants", function()
+		describe.tags(TAG_FULL, "large-number invariants", function()
 			it("randomized invariants should hold for large values (~12-limb)", function()
 				for _ = 1, 90 do
 					local sa = rand_decimal(90)
@@ -941,7 +946,7 @@ return function(t)
 
 		--## Multiplication coverage
 		-- Every algorithm tier and sign combo; Toom-3 bugs only surface at 90+ limbs with mixed signs.
-		describe("mul coverage: all tiers and sign combos", function()
+		describe.tags(TAG_FULL, "mul coverage: all tiers and sign combos", function()
 			it("basecase: all sizes 1–44 with sign variation match naive", function()
 				for len = 1, 44 do
 					local signA = (len % 2 == 0) and -1 or 1
@@ -1011,7 +1016,7 @@ return function(t)
 		end)
 
 		--## Algebraic laws at scale
-		describe("algebraic laws at scale", function()
+		describe.tags(TAG_FULL, "algebraic laws at scale", function()
 			it("commutativity a*b = b*a at karatsuba, toom3, and mixed sizes", function()
 				for _, len in ipairs({45, 70, 90, 120}) do
 					for _, sign in ipairs({1, -1}) do
@@ -1066,7 +1071,7 @@ return function(t)
 		end)
 
 		--## Exponentiation identities
-		describe("exponentiation laws", function()
+		describe.tags(TAG_FAST, "exponentiation laws", function()
 			it("a^m * a^n = a^(m+n) for several bases and exponent pairs", function()
 				local bases = {bint("2"), bint("-3"), bint("100"), bint("16777217"), bint("-16777215")}
 				for _, base in ipairs(bases) do
@@ -1119,7 +1124,7 @@ return function(t)
 
 		--## Division coverage: signed and large
 		-- Large inputs, all sign combos, floor and truncated semantics.
-		describe("division coverage: signed and large", function()
+		describe.tags(TAG_FULL, "division coverage: signed and large", function()
 			it("floor div: all 4 sign combos at toom3 sizes satisfy q*b+r=a and range", function()
 				local signs = {{1,1},{1,-1},{-1,1},{-1,-1}}
 				for i, sg in ipairs(signs) do
@@ -1192,7 +1197,7 @@ return function(t)
 
 		--## Edge-case regressions
 		-- Carry/borrow ripple, tiny-vs-massive operands, and perfect-square sqrt boundaries.
-		describe("edge-case regressions", function()
+		describe.tags(TAG_FAST, "edge-case regressions", function()
 			it("preserves tiny deltas when adding to or subtracting from massive values", function()
 				local huge = make_big(220, 314159, 1)
 				local one = bint.one()
@@ -1272,7 +1277,7 @@ return function(t)
 		end)
 
 		--## Sqrt coverage: large inputs and algorithm-boundary sweep
-		describe("sqrt coverage: large and boundary", function()
+		describe.tags(TAG_FULL, "sqrt coverage: large and boundary", function()
 			it("isqrt(n)^2 <= n < (isqrt(n)+1)^2 for 50 large random inputs", function()
 				local one = bint.one()
 				for i = 1, 50 do
@@ -1312,7 +1317,7 @@ return function(t)
 		end)
 
 		--## Identity and zero laws at large scale
-		describe("identity and zero laws", function()
+		describe.tags(TAG_FAST, "identity and zero laws", function()
 			it("a * 0 = 0 and 0 * a = 0 for large a at each tier", function()
 				local zero = bint.zero()
 				for _, len in ipairs({44, 45, 90, 150}) do
@@ -1381,7 +1386,7 @@ return function(t)
 
 		--## Operator metamethods
 		-- Tests <, <=, ==, ^ as operators rather than via core.*.
-		describe("operator metamethods", function()
+		describe.tags(TAG_FAST, "operator metamethods", function()
 			it("'<' should compare correctly across all sign combinations", function()
 				-- Positive vs positive
 				expect(bint("3") < bint("5")).to.equal(true)
@@ -1437,7 +1442,7 @@ return function(t)
 		end)
 
 		--## __tostring and tonumber edge cases
-		describe("__tostring and tonumber edge cases", function()
+		describe.tags(TAG_FAST, "__tostring and tonumber edge cases", function()
 			it("tostring() metamethod should return the decimal representation", function()
 				expect(tostring(bint("42"))).to.equal("42")
 				expect(tostring(bint.zero())).to.equal("0")
@@ -1472,7 +1477,7 @@ return function(t)
 
 		--## Constructor edge cases
 		-- Covers from_limbs({}) / ({0}), non-decimal leading zeros, and factory freshness.
-		describe("constructor edge cases", function()
+		describe.tags(TAG_FAST, "constructor edge cases", function()
 			it("from_limbs({}) should produce a zero Bint", function()
 				local z = bint.from_limbs({})
 				expect(S(z)).to.equal("0")
@@ -1513,7 +1518,7 @@ return function(t)
 		--   1. _mut variants return the exact same object.
 		--   2. Non-mutating core ops leave both operands unchanged.
 		--   3. bint instance methods are faithful proxies: a:op(x) === core.op(a, bint.new(x)).
-		describe("bint/core contract", function()
+		describe.tags(TAG_FAST, "bint/core contract", function()
 			it("_mut variants should return the same Bint object, not a copy", function()
 				local a = bint("100")
 				local r = core.abs_mut(a)
@@ -1582,7 +1587,7 @@ return function(t)
 
 		--## Instance methods, __len, tobe trim, and Toom-3 boundary
 		-- Covers :le(), :clone(), :tostring(base), :tdiv()/:tmod(), __len at BASE edges, tobe trim, and the 123/124/125-limb mul boundary.
-		describe("instance methods, __len, tobe trim, and toom3 boundary", function()
+		describe.tags(TAG_FULL, "instance methods, __len, tobe trim, and toom3 boundary", function()
 			it("a:le(b) should return correct comparisons with coercion", function()
 				local a = bint("10")
 				expect(a:le(10)).to.equal(true)
@@ -1644,6 +1649,392 @@ return function(t)
 						local b = make_big(len, si * 311 + len + 9, sg[2])
 						expect(S(core.mul(a, b))).to.equal(S(naive_mul(a, b)))
 					end
+				end
+			end)
+		end)
+
+		--## Algorithm-direct: correctness at arbitrary sizes
+		-- Each algorithm is tested at sizes on both sides of the dispatch threshold,
+		-- exercising correctness that cannot be reached through core.* dispatch alone.
+			describe.tags(TAG_FULL, "algorithm-direct: correctness at arbitrary sizes", function()
+			local signs = {{1,1},{1,-1},{-1,1},{-1,-1}}
+
+			--## Multiplication
+
+			it("mul_basecase matches naive_mul at sizes within the safe precision range", function()
+				-- mul_limbs_basecase accumulates n products of up to (2^24)^2 ≈ 2^48 each.
+				-- For the sum to stay below the 2^53 IEEE-754 integer-exact boundary, n must be
+				-- small.  KARATSUBA_THR=44 is the dispatch ceiling; testing beyond it is not
+				-- meaningful because the algorithm is not designed for larger inputs.
+				for _, len in ipairs({1, 10, 20, 43}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(len, si * 31 + len, sg[1])
+						local b = make_big(len, si * 37 + len + 5, sg[2])
+						expect(S(algorithms.mul_basecase(a, b))).to.equal(S(naive_mul(a, b)))
+					end
+				end
+			end)
+
+			it("mul_karatsuba matches naive_mul at all sizes including below KARATSUBA_THR=44", function()
+				-- Sizes 1–43 are the key blind spot: dispatch never routes here, so bugs would go undetected.
+				for _, len in ipairs({1, 10, 44, 45, 89, 124}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(len, si * 41 + len, sg[1])
+						local b = make_big(len, si * 43 + len + 3, sg[2])
+						expect(S(algorithms.mul_karatsuba(a, b))).to.equal(S(naive_mul(a, b)))
+					end
+				end
+			end)
+
+			it("mul_toom3 matches naive_mul at all sizes including below TOOM3_THR=124 and size 1", function()
+				-- Size 1 is a degenerate k=0 case; valid regression target.
+				for _, len in ipairs({1, 44, 89, 123, 124, 150}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(len, si * 47 + len, sg[1])
+						local b = make_big(len, si * 53 + len + 7, sg[2])
+						expect(S(algorithms.mul_toom3(a, b))).to.equal(S(naive_mul(a, b)))
+					end
+				end
+			end)
+
+			it("mul_karatsuba and mul_toom3 match core.mul at their in-range sizes", function()
+				-- Karatsuba range: both >= 44 and both < 124
+				for _, len in ipairs({45, 63, 89}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(len, si * 59 + len, sg[1])
+						local b = make_big(len, si * 61 + len + 1, sg[2])
+						expect(S(algorithms.mul_karatsuba(a, b))).to.equal(S(core.mul(a, b)))
+					end
+				end
+				-- Toom-3 range: both >= 124
+				for _, len in ipairs({124, 140, 160}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(len, si * 67 + len, sg[1])
+						local b = make_big(len, si * 71 + len + 3, sg[2])
+						expect(S(algorithms.mul_toom3(a, b))).to.equal(S(core.mul(a, b)))
+					end
+				end
+			end)
+
+			--## Division
+
+			it("div_knuth and div_burnikel throw on division by zero", function()
+				expect(function()
+					algorithms.div_knuth(bint("1"), bint.zero())
+				end).to.throw("division by zero")
+				expect(function()
+					algorithms.div_burnikel(bint("1"), bint.zero())
+				end).to.throw("division by zero")
+			end)
+
+			it("div_knuth and div_burnikel handle zero dividend", function()
+				local b = make_big(5, 999, 1)
+				local q, r = algorithms.div_knuth(bint.zero(), b)
+				expect(S(q)).to.equal("0"); expect(S(r)).to.equal("0")
+				q, r = algorithms.div_burnikel(bint.zero(), b)
+				expect(S(q)).to.equal("0"); expect(S(r)).to.equal("0")
+			end)
+
+			it("div_knuth and div_burnikel match core.divmod on floor-division edge cases", function()
+				-- |a| < |b|, |a| == |b|, all four sign combos
+				local cases = {
+					{"5", "10"}, {"-5", "10"}, {"5", "-10"}, {"-5", "-10"},
+					{"7", "7"}, {"-7", "7"}, {"7", "-7"}, {"-7", "-7"},
+				}
+				for _, c in ipairs(cases) do
+					local a, b = bint(c[1]), bint(c[2])
+					local qref, rref = core.divmod(a, b)
+					local qk, rk = algorithms.div_knuth(a, b)
+					local qbz, rbz = algorithms.div_burnikel(a, b)
+					expect(S(qk)).to.equal(S(qref)); expect(S(rk)).to.equal(S(rref))
+					expect(S(qbz)).to.equal(S(qref)); expect(S(rbz)).to.equal(S(rref))
+				end
+			end)
+
+			it("div_knuth matches core.divmod at small/medium/large sizes with all sign combos", function()
+				-- Large case forces Knuth on inputs normally handled by Burnikel-Ziegler.
+				for _, pair in ipairs({{5, 3}, {100, 60}, {350, 300}}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(pair[1], si * 73 + pair[1], sg[1])
+						local b = make_big(pair[2], si * 79 + pair[2], sg[2])
+						local q, r = algorithms.div_knuth(a, b)
+						local qref, rref = core.divmod(a, b)
+						expect(S(q)).to.equal(S(qref)); expect(S(r)).to.equal(S(rref))
+						expect(S(core.add(core.mul(q, b), r))).to.equal(S(a))
+						expect_floor_remainder_range(r, b)
+					end
+				end
+			end)
+
+			it("div_burnikel matches core.divmod at small/medium/large sizes with all sign combos", function()
+				-- Small/medium operands (< BURNIKEL_THR=232): outer BZ driver + internal Knuth fallback.
+				-- Large operands (both > 232, diff > 40): real BZ path.
+				for _, pair in ipairs({{5, 3}, {100, 60}, {350, 300}}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(pair[1], si * 83 + pair[1], sg[1])
+						local b = make_big(pair[2], si * 89 + pair[2], sg[2])
+						local q, r = algorithms.div_burnikel(a, b)
+						local qref, rref = core.divmod(a, b)
+						expect(S(q)).to.equal(S(qref)); expect(S(r)).to.equal(S(rref))
+						expect(S(core.add(core.mul(q, b), r))).to.equal(S(a))
+						expect_floor_remainder_range(r, b)
+					end
+				end
+			end)
+
+			--## Sqrt
+
+			it("sqrt wrappers return zero for non-positive inputs", function()
+				expect(S(algorithms.sqrt_newton(bint.zero()))).to.equal("0")
+				expect(S(algorithms.sqrt_newton(bint("-5")))).to.equal("0")
+				expect(S(algorithms.sqrt_karatsuba(bint.zero()))).to.equal("0")
+				expect(S(algorithms.sqrt_karatsuba(bint("-5")))).to.equal("0")
+			end)
+
+			it("sqrt_newton satisfies isqrt inequalities for limb counts 1–20", function()
+				local one = bint.one()
+				for i = 1, 20 do
+					local n = make_big(i, i * 181 + 7, 1)
+					local s = algorithms.sqrt_newton(n)
+					expect(core.le(core.mul(s, s), n)).to.equal(true)
+					expect(core.lt(n, core.mul(core.add(s, one), core.add(s, one)))).to.equal(true)
+				end
+			end)
+
+			it("sqrt_karatsuba satisfies isqrt inequalities for limb counts 1–70 including below SQRT_KAR_THR=4", function()
+				local one = bint.one()
+				for i = 1, 70 do
+					local n = make_big(i, i * 191 + 11, 1)
+					local s = algorithms.sqrt_karatsuba(n)
+					expect(core.le(core.mul(s, s), n)).to.equal(true)
+					expect(core.lt(n, core.mul(core.add(s, one), core.add(s, one)))).to.equal(true)
+				end
+			end)
+
+			it("sqrt_newton and sqrt_karatsuba match core.sqrt at their natural sizes", function()
+				-- sqrt_newton matches at small sizes (below SQRT_KAR_THR=4)
+				for i = 1, 3 do
+					local n = make_big(i, i * 197 + 5, 1)
+					expect(S(algorithms.sqrt_newton(n))).to.equal(S(core.sqrt(n)))
+				end
+				-- sqrt_karatsuba matches at sizes on and above SQRT_KAR_THR=4
+				for i = 4, 30 do
+					local n = make_big(i, i * 199 + 7, 1)
+					expect(S(algorithms.sqrt_karatsuba(n))).to.equal(S(core.sqrt(n)))
+				end
+			end)
+
+			--## Immutability
+
+			it("algorithm wrappers do not mutate their operands", function()
+				local a = make_big(50, 313, 1)
+				local b = make_big(50, 317, -1)
+				local sa, sb = S(a), S(b)
+
+				local _ = algorithms.mul_basecase(a, b)
+				expect(S(a)).to.equal(sa); expect(S(b)).to.equal(sb)
+				_ = algorithms.mul_karatsuba(a, b)
+				expect(S(a)).to.equal(sa); expect(S(b)).to.equal(sb)
+				_ = algorithms.mul_toom3(a, b)
+				expect(S(a)).to.equal(sa); expect(S(b)).to.equal(sb)
+
+				local a2 = make_big(50, 331, 1)
+				local b2 = make_big(30, 337, -1)
+				local sa2, sb2 = S(a2), S(b2)
+				_ = algorithms.div_knuth(a2, b2)
+				expect(S(a2)).to.equal(sa2); expect(S(b2)).to.equal(sb2)
+				_ = algorithms.div_burnikel(a2, b2)
+				expect(S(a2)).to.equal(sa2); expect(S(b2)).to.equal(sb2)
+
+				local n = make_big(20, 347, 1)
+				local sn = S(n)
+				_ = algorithms.sqrt_newton(n)
+				expect(S(n)).to.equal(sn)
+				_ = algorithms.sqrt_karatsuba(n)
+				expect(S(n)).to.equal(sn)
+			end)
+		end)
+
+		--## Stress: exact safe-range oracles + large-limb differential checks
+		-- These are intentionally expensive and are tagged stress-only.
+		describe.tags(TAG_STRESS, "stress: exactness and deep differential checks", function()
+			local function make_int_cache(lo, hi)
+				local out = {}
+				for n = lo, hi do
+					out[n] = bint.from_int(n)
+				end
+				return out
+			end
+
+			local function expect_exact_int(x, n)
+				expect(bint.tonumber(x)).to.equal(n)
+			end
+
+			local function expect_bint_eq(a, b)
+				expect(core.eq(a, b)).to.equal(true)
+			end
+
+			it("core arithmetic, floor/trunc division, and sqrt are exactly correct on dense safe ranges", function()
+				local lo, hi = -128, 128
+				local ints = make_int_cache(lo, hi)
+
+				for a = lo, hi do
+					local A = ints[a]
+
+					for b = lo, hi do
+						local B = ints[b]
+						expect_exact_int(core.add(A, B), a + b)
+						expect_exact_int(core.sub(A, B), a - b)
+						expect_exact_int(core.mul(A, B), a * b)
+
+						if b ~= 0 then
+							local qf, rf = core.divmod(A, B)
+							expect_exact_int(qf, floor_div(a, b))
+							expect_exact_int(rf, floor_mod(a, b))
+
+							local qt, rt = core.tdivmod(A, B)
+							expect_exact_int(qt, trunc_div(a, b))
+							expect_exact_int(rt, trunc_mod(a, b))
+						end
+					end
+				end
+
+				for n = -256, 65535 do
+					local expected = n > 0 and math.floor(math.sqrt(n)) or 0
+					expect_exact_int(core.sqrt(bint.from_int(n)), expected)
+				end
+			end)
+
+			it("all public algorithm wrappers are exactly correct on dense safe ranges", function()
+				local lo, hi = -96, 96
+				local ints = make_int_cache(lo, hi)
+
+				for a = lo, hi do
+					local A = ints[a]
+					for b = lo, hi do
+						local B = ints[b]
+						local expectedMul = a * b
+
+						expect_exact_int(algorithms.mul_basecase(A, B), expectedMul)
+						expect_exact_int(algorithms.mul_karatsuba(A, B), expectedMul)
+						expect_exact_int(algorithms.mul_toom3(A, B), expectedMul)
+
+						if b ~= 0 then
+							local qk, rk = algorithms.div_knuth(A, B)
+							expect_exact_int(qk, floor_div(a, b))
+							expect_exact_int(rk, floor_mod(a, b))
+
+							local qb, rb = algorithms.div_burnikel(A, B)
+							expect_exact_int(qb, floor_div(a, b))
+							expect_exact_int(rb, floor_mod(a, b))
+						end
+					end
+				end
+
+				for n = -128, 32768 do
+					local expected = n > 0 and math.floor(math.sqrt(n)) or 0
+					local x = bint.from_int(n)
+					expect_exact_int(algorithms.sqrt_newton(x), expected)
+					expect_exact_int(algorithms.sqrt_karatsuba(x), expected)
+				end
+			end)
+
+			it("large-limb multiplication corpus: algorithms and core agree with naive/differential oracles", function()
+				local signs = {{1,1},{1,-1},{-1,1},{-1,-1}}
+
+				-- Threshold-heavy exact anchors against independent schoolbook oracle.
+				for _, len in ipairs({44, 45, 89, 90, 123, 124, 150}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(len, 401 + len * 3 + si, sg[1])
+						local b = make_big(len, 457 + len * 5 + si, sg[2])
+						local oracle = naive_mul(a, b)
+
+						expect_bint_eq(core.mul(a, b), oracle)
+						expect_bint_eq(algorithms.mul_karatsuba(a, b), oracle)
+						expect_bint_eq(algorithms.mul_toom3(a, b), oracle)
+					end
+				end
+
+				-- Larger Toom-3-scale differential corpus (exact via Karatsuba oracle + core dispatch cross-check).
+				for i = 1, 24 do
+					local lenA = 124 + (i * 13) % 220
+					local lenB = 124 + (i * 17) % 220
+					local signA = (i % 2 == 0) and 1 or -1
+					local signB = (i % 3 == 0) and -1 or 1
+					local a = make_big(lenA, 503 + i * 23, signA)
+					local b = make_big(lenB, 601 + i * 29, signB)
+
+					local kt = algorithms.mul_karatsuba(a, b)
+					local tt = algorithms.mul_toom3(a, b)
+					expect_bint_eq(tt, kt)
+					expect_bint_eq(core.mul(a, b), tt)
+				end
+			end)
+
+			it("large-limb division corpus: Knuth, Burnikel, and core.divmod all agree", function()
+				local signs = {{1,1},{1,-1},{-1,1},{-1,-1}}
+
+				for _, pr in ipairs({
+					{273, 232}, -- BZ threshold boundary with diff > 40
+					{320, 233}, -- regression: BZ didn't unshift remainder by `shift` words (shift=1 for 233-limb divisor)
+					{420, 280},
+					{540, 300},
+					{700, 360},
+				}) do
+					for si, sg in ipairs(signs) do
+						local a = make_big(pr[1], 701 + pr[1] * 3 + si, sg[1])
+						local b = make_big(pr[2], 809 + pr[2] * 5 + si, sg[2])
+
+						local qCore, rCore = core.divmod(a, b)
+						local qK, rK = algorithms.div_knuth(a, b)
+						local qB, rB = algorithms.div_burnikel(a, b)
+
+						expect_bint_eq(qK, qCore); expect_bint_eq(rK, rCore)
+						expect_bint_eq(qB, qCore); expect_bint_eq(rB, rCore)
+
+						expect_bint_eq(core.add(core.mul(qK, b), rK), a)
+						expect_bint_eq(core.add(core.mul(qB, b), rB), a)
+						expect_floor_remainder_range(rK, b)
+						expect_floor_remainder_range(rB, b)
+					end
+				end
+			end)
+
+			it("large-limb sqrt corpus: Newton, Karatsuba, and core.sqrt agree exactly", function()
+				local one = bint.one()
+
+				-- Perfect squares and neighbors across and far above the Karatsuba threshold.
+				for i = 1, 24 do
+					local a = make_big(4 + i * 8, 911 + i * 31, 1)
+					local a2 = core.mul(a, a)
+					local ap1 = core.add(a, one)
+					local am1 = core.sub(a2, one)
+					local ap1sq = core.mul(ap1, ap1)
+
+					expect_bint_eq(algorithms.sqrt_newton(a2), a)
+					expect_bint_eq(algorithms.sqrt_karatsuba(a2), a)
+					expect_bint_eq(core.sqrt(a2), a)
+
+					expect_bint_eq(algorithms.sqrt_karatsuba(am1), core.sub(a, one))
+					expect_bint_eq(core.sqrt(am1), core.sub(a, one))
+
+					expect_bint_eq(algorithms.sqrt_karatsuba(core.sub(ap1sq, one)), a)
+					expect_bint_eq(core.sqrt(core.sub(ap1sq, one)), a)
+					expect_bint_eq(algorithms.sqrt_karatsuba(ap1sq), ap1)
+					expect_bint_eq(core.sqrt(ap1sq), ap1)
+				end
+
+				-- Random-looking non-squares: exact differential + inequalities.
+				for len = 4, 180, 7 do
+					local n = make_big(len, 1201 + len * 19, 1)
+					local sN = algorithms.sqrt_newton(n)
+					local sK = algorithms.sqrt_karatsuba(n)
+					local sC = core.sqrt(n)
+					expect_bint_eq(sN, sC)
+					expect_bint_eq(sK, sC)
+					expect(core.le(core.mul(sC, sC), n)).to.equal(true)
+					local s1 = core.add(sC, one)
+					expect(core.lt(n, core.mul(s1, s1))).to.equal(true)
 				end
 			end)
 		end)

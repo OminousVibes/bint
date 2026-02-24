@@ -1,4 +1,5 @@
 --!nocheck
+--draft 2
 
 --[[--
 specs - minimal spec runner for Lune
@@ -6,7 +7,7 @@ authored by OminousVibes (https://github.com/OminousVibes)
 
 Small, self-contained spec runner used by this repository. It supports
 recursive `*.spec.luau` discovery, a BDD-style DSL (`describe` / `it` /
-`expect`), `.only` / `.skip` variants, hooks, and basic CLI filtering.
+`expect`), `.only` / `.skip` variants, hooks, and tag-based filtering.
 
 ## Spec module contract
 
@@ -33,10 +34,21 @@ local process = require("@lune/process")
 
 type Hook = () -> ()
 
+type TagList = { string }
+
+type TagMode = "any" | "all"
+
+type NodeOpts = {
+	only: boolean?,
+	skip: boolean?,
+	tags: TagList?,
+}
+
 type SuiteContext = {
 	name: string,
 	only: boolean,
 	skip: boolean,
+	tags: TagList,
 	beforeEach: { Hook },
 	afterEach: { Hook },
 }
@@ -49,11 +61,15 @@ type TestCase = {
 	beforeHooks: { Hook },
 	afterHooks: { Hook },
 	file: string,
+	tags: TagList,
 }
 
 type Options = {
 	testsRoot: string,
-	grep: string?,
+	includeTags: TagList,
+	excludeTags: TagList,
+	tagMode: TagMode,
+	listTags: boolean,
 	failFast: boolean,
 	quiet: boolean,
 }
@@ -73,6 +89,64 @@ type Summary = {
 -- Prefix check helper used for CLI parsing and path normalization.
 local function startsWith(s: string, prefix: string): boolean
 	return string.sub(s, 1, #prefix) == prefix
+end
+
+-- Parse and validate a tag name, normalizing to lowercase for stable matching.
+local function normalizeTag(raw: any, source: string): string
+	assert(type(raw) == "string", source .. ": tag must be a string")
+	assert(#raw > 0, source .. ": tag must be non-empty")
+	local tag = string.lower(raw)
+	assert(string.match(tag, "^[%w:_%-]+$") ~= nil, source .. ": invalid tag '" .. raw .. "'")
+	return tag
+end
+
+-- Normalize a tag list and remove duplicates while preserving order.
+local function normalizeTags(rawTags: any, source: string): TagList
+	assert(type(rawTags) == "table", source .. ": tags must be an array of strings")
+	local out: TagList = {}
+	local seen: {[string]: boolean} = {}
+	for i, raw in ipairs(rawTags) do
+		local tag = normalizeTag(raw, source .. (" tag[%d]"):format(i))
+		if not seen[tag] then
+			seen[tag] = true
+			table.insert(out, tag)
+		end
+	end
+	return out
+end
+
+-- Merge two tag lists with deduplication while preserving left-to-right order.
+local function mergeTags(a: TagList?, b: TagList?): TagList
+	if a == nil and b == nil then
+		return {}
+	end
+	local out: TagList = {}
+	local seen: {[string]: boolean} = {}
+	local function append(tags: TagList?)
+		if tags == nil then return end
+		for _, tag in ipairs(tags) do
+			if not seen[tag] then
+				seen[tag] = true
+				table.insert(out, tag)
+			end
+		end
+	end
+	append(a)
+	append(b)
+	return out
+end
+
+-- Parse comma-separated tags (used by CLI `--tags` / `--exclude-tags`).
+local function parseCsvTags(csv: string, source: string): TagList
+	local out: TagList = {}
+	for part in string.gmatch(csv, "[^,]+") do
+		local trimmed = string.gsub(part, "^%s+", "")
+		trimmed = string.gsub(trimmed, "%s+$", "")
+		if #trimmed > 0 then
+			table.insert(out, normalizeTag(trimmed, source))
+		end
+	end
+	return out
 end
 
 -- Produce a stable, bounded representation for assertion messages.
@@ -256,27 +330,62 @@ end
 
 local options: Options = {
 	testsRoot = "tests",
-	grep = nil,
+	includeTags = {},
+	excludeTags = {},
+	tagMode = "any",
+	listTags = false,
 	failFast = false,
 	quiet = false,
 }
 
 -- Parse a small flag set directly from process.args.
+local function requireFlagValue(flag: string, idx: number): string
+	local value = process.args[idx]
+	if value == nil or startsWith(value, "--") then
+		print(("Missing value for %s"):format(flag))
+		process.exit(1)
+	end
+	return value
+end
+
 local i = 1
 while i <= #process.args do
 	local arg = process.args[i]
 	if arg == "--tests" or arg == "--dir" then
 		i += 1
-		options.testsRoot = process.args[i] or options.testsRoot
-	elseif arg == "--grep" then
+		options.testsRoot = requireFlagValue(arg, i)
+	elseif arg == "--tag" then
 		i += 1
-		options.grep = process.args[i]
+		local tag = normalizeTag(requireFlagValue(arg, i), arg)
+		options.includeTags = mergeTags(options.includeTags, { tag })
+	elseif arg == "--exclude-tag" then
+		i += 1
+		local tag = normalizeTag(requireFlagValue(arg, i), arg)
+		options.excludeTags = mergeTags(options.excludeTags, { tag })
+	elseif arg == "--tags" then
+		i += 1
+		options.includeTags = mergeTags(options.includeTags, parseCsvTags(requireFlagValue(arg, i), arg))
+	elseif arg == "--exclude-tags" then
+		i += 1
+		options.excludeTags = mergeTags(options.excludeTags, parseCsvTags(requireFlagValue(arg, i), arg))
+	elseif arg == "--tag-mode" then
+		i += 1
+		local mode = string.lower(requireFlagValue(arg, i))
+		if mode ~= "any" and mode ~= "all" then
+			print(("Invalid --tag-mode %q (expected 'any' or 'all')"):format(mode))
+			process.exit(1)
+		end
+		options.tagMode = mode :: TagMode
+	elseif arg == "--list-tags" then
+		options.listTags = true
 	elseif arg == "--fail-fast" then
 		options.failFast = true
 	elseif arg == "--quiet" then
 		options.quiet = true
 	elseif arg == "--help" then
-		print("Usage: lune run libs/specs.luau [--tests <path>] [--grep <pattern>] [--fail-fast] [--quiet]")
+		print(
+			"Usage: lune run libs/specs.luau [--tests <path>] [--tag <name>] [--exclude-tag <name>] [--tags <a,b>] [--exclude-tags <a,b>] [--tag-mode <any|all>] [--list-tags] [--fail-fast] [--quiet]"
+		)
 		process.exit(0)
 	elseif not startsWith(arg, "--") then
 		options.testsRoot = arg
@@ -305,6 +414,7 @@ local function pushFileSuite(filePath: string)
 			name = filePath,
 			only = false,
 			skip = false,
+			tags = {},
 			beforeEach = {},
 			afterEach = {},
 		},
@@ -371,19 +481,19 @@ end
 
 --# DSL
 
---- Register a suite and execute its definition body immediately.
---- @param name Suite display name.
---- @param body Callback that registers nested suites/tests.
---- @param[opt] opts Optional `.only` / `.skip` flags.
---- @raise An error if the suite body throws during definition.
-local function registerDescribe(name: string, body: () -> (), opts: {only: boolean?, skip: boolean?}?)
+-- Register a suite and execute its definition body immediately.
+-- Supports optional metadata via `opts`, including inherited tags.
+local function registerDescribe(name: string, body: () -> (), opts: NodeOpts?)
 	assert(type(name) == "string", "describe(name, body): name must be a string")
 	assert(type(body) == "function", "describe(name, body): body must be a function")
 
+	local parent = currentSuite()
+	local ownTags = if opts ~= nil and opts.tags ~= nil then normalizeTags(opts.tags, "describe(name, body, opts)") else {}
 	local suite: SuiteContext = {
 		name = name,
 		only = opts and opts.only == true or false,
 		skip = opts and opts.skip == true or false,
+		tags = mergeTags(parent.tags, ownTags),
 		beforeEach = {},
 		afterEach = {},
 	}
@@ -400,11 +510,8 @@ local function registerDescribe(name: string, body: () -> (), opts: {only: boole
 	end
 end
 
---- Register a test case using the current suite stack snapshot.
---- @param name Test display name.
---- @param[opt] body Test callback. Omitted bodies become pending no-op tests.
---- @param[opt] opts Optional `.only` / `.skip` flags.
-local function registerIt(name: string, body: (() -> ())?, opts: {only: boolean?, skip: boolean?}?)
+-- Register a test case using the current suite stack snapshot, optionally with tags.
+local function registerIt(name: string, body: (() -> ())?, opts: NodeOpts?)
 	assert(type(name) == "string", "it(name, body): name must be a string")
 	local fn = body
 	if fn == nil then
@@ -415,6 +522,7 @@ local function registerIt(name: string, body: (() -> ())?, opts: {only: boolean?
 	-- Test-level flags inherit `.only` / `.skip` from any enclosing suite.
 	local only = (opts and opts.only == true or false) or anySuiteOnly()
 	local skip = (opts and opts.skip == true or false) or anySuiteSkip()
+	local ownTags = if opts ~= nil and opts.tags ~= nil then normalizeTags(opts.tags, "it(name, body, opts)") else {}
 
 	if only then
 		hasOnly = true
@@ -428,6 +536,7 @@ local function registerIt(name: string, body: (() -> ())?, opts: {only: boolean?
 		beforeHooks = collectBeforeHooks(),
 		afterHooks = collectAfterHooks(),
 		file = currentSpecPath,
+		tags = mergeTags(currentSuite().tags, ownTags),
 	})
 end
 
@@ -447,32 +556,66 @@ end
 
 local api = {}
 
+-- Build an opts table with merged tags for `.tags(...)` sugar.
+local function optsWithTags(tags: TagList, opts: NodeOpts?): NodeOpts
+	assert(type(tags) == "table", "tags(...): tags must be an array of strings")
+	local merged = if opts ~= nil and opts.tags ~= nil then mergeTags(tags, opts.tags) else tags
+	local out: NodeOpts = {
+		only = opts and opts.only or nil,
+		skip = opts and opts.skip or nil,
+		tags = merged,
+	}
+	return out
+end
+
 -- Callable `describe` table with `.only` / `.skip` variants.
 local describeApi = {}
 setmetatable(describeApi, {
-	__call = function(_, name: string, body: () -> ())
-		registerDescribe(name, body, nil)
+	__call = function(_, name: string, body: () -> (), opts: NodeOpts?)
+		registerDescribe(name, body, opts)
 	end,
 })
-describeApi.only = function(name: string, body: () -> ())
-	registerDescribe(name, body, { only = true })
+describeApi.only = function(name: string, body: () -> (), opts: NodeOpts?)
+	registerDescribe(name, body, {
+		only = true,
+		skip = opts and opts.skip or nil,
+		tags = opts and opts.tags or nil,
+	})
 end
-describeApi.skip = function(name: string, body: () -> ())
-	registerDescribe(name, body, { skip = true })
+describeApi.skip = function(name: string, body: () -> (), opts: NodeOpts?)
+	registerDescribe(name, body, {
+		only = opts and opts.only or nil,
+		skip = true,
+		tags = opts and opts.tags or nil,
+	})
+end
+describeApi.tags = function(tags: TagList, name: string, body: () -> (), opts: NodeOpts?)
+	registerDescribe(name, body, optsWithTags(tags, opts))
 end
 
 -- Callable `it` table with `.only` / `.skip` variants.
 local itApi = {}
 setmetatable(itApi, {
-	__call = function(_, name: string, body: (() -> ())?)
-		registerIt(name, body, nil)
+	__call = function(_, name: string, body: (() -> ())?, opts: NodeOpts?)
+		registerIt(name, body, opts)
 	end,
 })
-itApi.only = function(name: string, body: (() -> ())?)
-	registerIt(name, body, { only = true })
+itApi.only = function(name: string, body: (() -> ())?, opts: NodeOpts?)
+	registerIt(name, body, {
+		only = true,
+		skip = opts and opts.skip or nil,
+		tags = opts and opts.tags or nil,
+	})
 end
-itApi.skip = function(name: string, body: (() -> ())?)
-	registerIt(name, body, { skip = true })
+itApi.skip = function(name: string, body: (() -> ())?, opts: NodeOpts?)
+	registerIt(name, body, {
+		only = opts and opts.only or nil,
+		skip = true,
+		tags = opts and opts.tags or nil,
+	})
+end
+itApi.tags = function(tags: TagList, name: string, body: (() -> ())?, opts: NodeOpts?)
+	registerIt(name, body, optsWithTags(tags, opts))
 end
 
 api.describe = describeApi
@@ -589,12 +732,51 @@ end
 
 --# FILTER / RUN
 
--- Apply `.only` and `--grep` filtering to a discovered test.
+-- True when a test case has a specific tag.
+local function hasTag(test: TestCase, tag: string): boolean
+	for _, t in ipairs(test.tags) do
+		if t == tag then
+			return true
+		end
+	end
+	return false
+end
+
+-- Match include/exclude tag filters against one test.
+local function passesTagFilters(test: TestCase): boolean
+	for _, tag in ipairs(options.excludeTags) do
+		if hasTag(test, tag) then
+			return false -- exclude wins
+		end
+	end
+
+	if #options.includeTags == 0 then
+		return true
+	end
+
+	if options.tagMode == "all" then
+		for _, tag in ipairs(options.includeTags) do
+			if not hasTag(test, tag) then
+				return false
+			end
+		end
+		return true
+	end
+
+	for _, tag in ipairs(options.includeTags) do
+		if hasTag(test, tag) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Apply `.only` and tag filters to a discovered test.
 local function shouldSelect(test: TestCase): boolean
 	if hasOnly and not test.only then
 		return false
 	end
-	if options.grep ~= nil and string.find(test.name, options.grep) == nil then
+	if not passesTagFilters(test) then
 		return false
 	end
 	return true
@@ -666,6 +848,32 @@ end
 
 --# MAIN
 
+-- Print all discovered tags with usage counts across registered tests.
+local function listDiscoveredTags()
+	local counts: {[string]: number} = {}
+	for _, test in ipairs(tests) do
+		for _, tag in ipairs(test.tags) do
+			counts[tag] = (counts[tag] or 0) + 1
+		end
+	end
+
+	local names: TagList = {}
+	for tag in pairs(counts) do
+		table.insert(names, tag)
+	end
+	table.sort(names)
+
+	if #names == 0 then
+		print("No tags discovered.")
+		return
+	end
+
+	print("Discovered tags:")
+	for _, tag in ipairs(names) do
+		print(("  %s (%d)"):format(tag, counts[tag]))
+	end
+end
+
 local specFiles: { string } = {}
 collectSpecFiles(options.testsRoot, specFiles)
 table.sort(specFiles)
@@ -682,6 +890,14 @@ end
 -- Print load/definition failures before execution summary output.
 for _, msg in ipairs(loadFailures) do
 	print("FAIL | " .. msg)
+end
+
+if options.listTags then
+	listDiscoveredTags()
+	if #loadFailures > 0 then
+		process.exit(1)
+	end
+	process.exit(0)
 end
 
 local summary: Summary = {

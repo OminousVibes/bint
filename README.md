@@ -4,7 +4,7 @@ Arbitrary-precision signed integer library for Luau.
 
 `bint` stores integers as little-endian base-`2^24` limbs, so values can grow without fixed-width overflow. It supports idiomatic operators (`+`, `-`, `*`, `//`, `%`, `^`, comparisons), plus a lower-level `core` API with mutating and non-mutating functions.
 
-Initial release: `0.1.0`.
+Latest release: `0.2.0`.
 
 ## Features
 
@@ -71,6 +71,14 @@ For `roblox-ts` / TypeScript users, the standard non-mutating arithmetic/compari
 - Division (truncated): `tdivmod`, `tdiv`, `tmod`
 - Other: `pow`, `sqrt`, `lshift`, `rshift`, `lshift_words`, `rshift_words`
 
+### `algorithms` entry points
+
+Direct algorithm entry points that bypass automatic threshold dispatch. Each function has the same contract as its `core` counterpart but always routes to the named algorithm regardless of operand size. Useful for benchmarking threshold crossover points and testing algorithm correctness independently.
+
+- Multiplication: `algorithms.mul_basecase`, `algorithms.mul_karatsuba`, `algorithms.mul_toom3`
+- Division: `algorithms.div_knuth`, `algorithms.div_burnikel`
+- Square root: `algorithms.sqrt_newton`, `algorithms.sqrt_karatsuba`
+
 ## Operator behavior
 
 Supported metamethods:
@@ -97,7 +105,11 @@ Supported metamethods:
 ## Running tests
 
 ```bash
-lune run libs/specs
+lune run libs/specs                       # full suite (all tags)
+lune run libs/specs --tag fast            # quick local validation
+lune run libs/specs --tag full            # CI-style: fast + full tests
+lune run libs/specs --tag stress          # everything including slow/deep checks
+lune run libs/specs --list-tags           # show available tags and counts
 ```
 
 ## Changelog format

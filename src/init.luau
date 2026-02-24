@@ -72,6 +72,7 @@ local tcreate = table.create
 local tinsert = table.insert
 local tclone  = table.clone
 local tmove   = table.move
+local tclear  = table.clear
 local tconcat = table.concat
 
 local sformat = string.format
@@ -594,6 +595,19 @@ local function div_burnikel(A: {number}, B: {number}): ({number}, {number})
 	end
 
 	div_by_int(z, sigma, true)
+	-- The word-shift applied to both operands to align B to a block boundary
+	-- must be undone on the remainder; the quotient is unaffected.
+	if shift > 0 then
+		local len = #z
+		if len > shift then
+			tmove(z, shift + 1, len, 1, z)
+			for i = len - shift + 1, len do
+				z[i] = nil
+			end
+		elseif len > 0 then
+			tclear(z)
+		end
+	end
 	return quotient, z
 end
 
@@ -1761,12 +1775,97 @@ end
 Bint.pow = function(self: Bint, other: BintArg): Bint
 	return core.pow(self, coerce(other))
 end
-Bint.sqrt     = core.sqrt
-Bint.lshift   = core.lshift
-Bint.rshift   = core.rshift
-Bint.lshift_words = core.lshift_words
-Bint.rshift_words = core.rshift_words
-Bint.tostring = bint.tostring
+Bint.sqrt			= core.sqrt
+Bint.lshift			= core.lshift
+Bint.rshift			= core.rshift
+Bint.lshift_words	= core.lshift_words
+Bint.rshift_words	= core.rshift_words
+Bint.tostring		= bint.tostring
+
+--# ALGORITHMS
+-- Direct algorithm entry points. Each function has the same contract as its core.* counterpart
+-- (same sign handling, error conditions, and floor/isqrt semantics) but bypasses the automatic
+-- threshold dispatch, always routing to the named algorithm regardless of operand size.
+-- Use these for benchmarking threshold crossover points and for testing algorithm correctness
+-- independently of dispatch decisions.
+
+-- Shared floor-division preamble used by div_knuth and div_burnikel.
+-- Mirrors core.divmod exactly; raw_div replaces the div_limbs dispatch call.
+local function divmod_with(a: Bint, b: Bint, raw_div: ({number}, {number}) -> ({number}, {number})): (Bint, Bint)
+	local as, bs = a.signum, b.signum
+	assert(bs ~= 0, "bint: division by zero")
+	if as == 0 then return make_zero(), make_zero() end
+	local U, V = a.limbs, b.limbs
+	local cmp = cmp_abs(U, V)
+	if cmp == -1 then
+		if as == 1 and bs == -1 or as == -1 and bs == 1 then
+			local rl, rs = add_signed(b.limbs, b.signum, a.limbs, a.signum)
+			return from_raw({1}, -1), from_raw(rl, rs)
+		end
+		return make_zero(), clone_bint(a)
+	elseif cmp == 0 then
+		return from_raw({1}, floor(as / bs)), make_zero()
+	end
+	local q_limbs, r_limbs = raw_div(U, V)
+	local q = from_raw(q_limbs, as * bs > 0 and 1 or -1)
+	local r = from_raw(r_limbs, as)
+	r = correct_remainder(as, bs, r, b)
+	if as ~= bs and r.signum ~= 0 then
+		q.limbs = add_limbs(q.limbs, {1}, true)
+		strip_zeros(q.limbs)
+	end
+	q.signum = as * bs > 0 and 1 or -1
+	return q, r
+end
+
+-- Shared sign wrapper for multiplication algorithms.
+local function mul_wrap(a: Bint, b: Bint, limb_fn: ({number}, {number}) -> {number}): Bint
+	local as, bs = a.signum, b.signum
+	if as == 0 or bs == 0 then return make_zero() end
+	return from_raw(limb_fn(a.limbs, b.limbs), as * bs > 0 and 1 or -1)
+end
+
+local algorithms = {}
+
+--- Multiply using schoolbook O(n²) algorithm, regardless of operand size.
+function algorithms.mul_basecase(a: Bint, b: Bint): Bint
+	return mul_wrap(a, b, mul_limbs_basecase)
+end
+
+--- Multiply using Karatsuba O(n^1.585) algorithm, regardless of operand size.
+function algorithms.mul_karatsuba(a: Bint, b: Bint): Bint
+	return mul_wrap(a, b, mul_limbs_karatsuba)
+end
+
+--- Multiply using Toom-Cook 3-way O(n^1.465) algorithm, regardless of operand size.
+function algorithms.mul_toom3(a: Bint, b: Bint): Bint
+	return mul_wrap(a, b, mul_limbs_toom3)
+end
+
+--- Floor-divide using Knuth Algorithm D, regardless of operand size.
+function algorithms.div_knuth(a: Bint, b: Bint): (Bint, Bint)
+	return divmod_with(a, b, div_knuths)
+end
+
+--- Floor-divide using the Burnikel-Ziegler outer driver, regardless of operand size.
+--- Note: div_burnikel falls back to Knuth when the divisor is below BURNIKEL_THR limbs.
+function algorithms.div_burnikel(a: Bint, b: Bint): (Bint, Bint)
+	return divmod_with(a, b, div_burnikel)
+end
+
+--- Compute the integer square root using Newton-Heron iteration, regardless of operand size.
+function algorithms.sqrt_newton(a: Bint): Bint
+	if a.signum ~= 1 then return make_zero() end
+	return from_raw(sqrt_newton(a.limbs), 1)
+end
+
+--- Compute the integer square root using the Karatsuba-recursive algorithm, regardless of size.
+--- Note: sqrt_karatsuba falls back to Newton for inputs below SQRT_KAR_THR limbs.
+function algorithms.sqrt_karatsuba(a: Bint): Bint
+	if a.signum ~= 1 then return make_zero() end
+	local s, _ = sqrt_karatsuba(a.limbs)
+	return from_raw(s, 1)
+end
 
 --# API
 
@@ -1778,4 +1877,5 @@ end })
 return {
 	bint = bint,
 	core = core,
+	algorithms = algorithms,
 }

@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] - 2026-02-23
+
+### Added
+
+- `algorithms` table exposing direct algorithm entry points that bypass automatic threshold dispatch: `mul_basecase`, `mul_karatsuba`, `mul_toom3`, `div_knuth`, `div_burnikel`, `sqrt_newton`, `sqrt_karatsuba`. Useful for benchmarking crossover points and testing algorithm correctness independently.
+- Tag-based test filtering in the spec runner (`--tag`, `--exclude-tag`, `--tags`, `--exclude-tags`, `--tag-mode`, `--list-tags`). Tags inherit through nested `describe` blocks.
+- `describe.tags()` and `it.tags()` sugar for tagging suites and tests inline.
+- Test suites tagged into `fast`, `full`, and `stress` tiers for selective execution.
+- New "algorithm-direct" test suite exercising every algorithm wrapper at sizes on both sides of dispatch thresholds.
+- New "stress" test suite with dense safe-range oracles and large-limb differential checks.
+
+### Removed
+
+- `--grep` CLI flag from the spec runner. Tag-based filtering supersedes it.
+
+### Fixed
+
+- Burnikel-Ziegler division now correctly unshifts the remainder by the word-alignment shift applied during normalization. Previously the remainder could be returned with extra trailing limbs.
+
 ## [0.1.0] - 2026-02-22
 
 ### Added
