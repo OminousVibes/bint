@@ -226,72 +226,102 @@ local function eq_abs(a: {number}, b: {number}): boolean
 	return true
 end
 
--- Add two unsigned limb arrays. in_place=true mutates the longer array.
-local function add_limbs(a: {number}, b: {number}, in_place: boolean?): {number}
+-- Add unsigned limb arrays: a += b (mutates a).
+local function add_limbs_mut(a: {number}, b: {number}): {number}
 	local an, bn = #a, #b
-	if bn > an then
-		a, b = b, a
-		an, bn = bn, an
-		in_place = false
-	end
-	local result: {number} = in_place and a or tclone(a)
-	if bn == 0 then return result end
+	if bn == 0 then return a end
 
-	-- GMP-style split loop: process the shared prefix, then propagate carry through the tail only if needed.
 	local carry = 0
-	for i = 1, bn do
-		local s = result[i] + b[i] + carry
+	local n = mmin(an, bn)
+
+	-- Process the shared prefix first, then only the remaining tail.
+	for i = 1, n do
+		local s = a[i] + b[i] + carry
 		if s >= BASE then
-			result[i] = s - BASE
+			a[i] = s - BASE
 			carry = 1
 		else
-			result[i] = s
+			a[i] = s
 			carry = 0
 		end
 	end
-	if carry ~= 0 then
-		for i = bn + 1, an do
-			local s = result[i] + 1
-			if s >= BASE then
-				result[i] = s - BASE
-			else
-				result[i] = s
-				return result
+
+	if an >= bn then
+		if carry ~= 0 then
+			for i = bn + 1, an do
+				local s = a[i] + 1
+				if s >= BASE then
+					a[i] = s - BASE
+				else
+					a[i] = s
+					return a
+				end
 			end
+			a[an + 1] = 1
 		end
-		result[an + 1] = 1
+		return a
 	end
-	return result
+
+	-- b has a longer tail; append/copy it into a and propagate any carry.
+	for i = an + 1, bn do
+		local s = b[i] + carry
+		if s >= BASE then
+			a[i] = s - BASE
+			carry = 1
+		else
+			a[i] = s
+			if i < bn then
+				tmove(b, i + 1, bn, i + 1, a)
+			end
+			return a
+		end
+	end
+	if carry ~= 0 then
+		a[bn + 1] = 1
+	end
+	return a
 end
 
--- Subtract unsigned: a - b, requires |a| >= |b|. in_place mutates a.
-local function sub_limbs(a: {number}, b: {number}, in_place: boolean?): {number}
+-- Add two unsigned limb arrays (pure); clones the longer operand, then mutates the clone.
+local function add_limbs(a: {number}, b: {number}): {number}
+	if #b > #a then
+		return add_limbs_mut(tclone(b), a)
+	end
+	return add_limbs_mut(tclone(a), b)
+end
+
+-- Subtract unsigned: a -= b, requires |a| >= |b| (mutates a).
+local function sub_limbs_mut(a: {number}, b: {number}): {number}
 	local an, bn = #a, #b
-	local result = in_place and a or tclone(a)
 	local borrow = 0
 	for i = 1, bn do
-		local d = result[i] - b[i] + borrow
+		local d = a[i] - b[i] + borrow
 		if d < 0 then
-			result[i] = d + BASE
+			a[i] = d + BASE
 			borrow = -1
 		else
-			result[i] = d
+			a[i] = d
 			borrow = 0
 		end
 	end
 	if borrow ~= 0 then
 		for i = bn + 1, an do
-			local d = result[i] - 1
+			local d = a[i] - 1
 			if d < 0 then
-				result[i] = d + BASE
+				a[i] = d + BASE
 			else
-				result[i] = d
+				a[i] = d
 				break
 			end
 		end
 	end
-	strip_zeros(result)
-	return result
+	strip_zeros(a)
+	return a
+end
+
+-- Subtract unsigned: a - b, requires |a| >= |b| (pure).
+local function sub_limbs(a: {number}, b: {number}): {number}
+	return sub_limbs_mut(tclone(a), b)
 end
 
 --## Multiplication (Karatsuba + Toom-Cook)
@@ -335,16 +365,16 @@ local function mul_limbs_karatsuba(x: {number}, y: {number}): {number}
 	local high1, high2 = get_upper(x, m2), get_upper(y, m2)
 
 	local z0 = mul_limbs(low1, low2)
-	local z1 = mul_limbs(add_limbs(low1, high1, true), add_limbs(low2, high2, true))
+	local z1 = mul_limbs(add_limbs_mut(low1, high1), add_limbs_mut(low2, high2))
 	local z2 = mul_limbs(high1, high2)
 
 	-- result = z0 + ((z1 - z2 - z0) << m2) + (z2 << 2*m2)
 	-- factored: (z2 << m2 + (z1 - (z2 + z0))) << m2 + z0
 	local result = lshift_limbs(z2, m2)
-	sub_limbs(z1, add_limbs(z2, z0, true), true)
-	result = add_limbs(result, z1, true)
+	sub_limbs_mut(z1, add_limbs_mut(z2, z0))
+	result = add_limbs_mut(result, z1)
 	result = lshift_limbs(result, m2)
-	add_limbs(result, z0, true)
+	add_limbs_mut(result, z0)
 	return result
 end
 
@@ -372,39 +402,39 @@ local function mul_limbs_toom3(x: {number}, y: {number}): {number}
 	local vm1 = mul_limbs(ex_limbs, ey_limbs)
 	local vm1_neg = ex_neg ~= ey_neg
 
-	da1 = add_limbs(da1, x1, true)
-	db1 = add_limbs(db1, y1, true)
+	da1 = add_limbs_mut(da1, x1)
+	db1 = add_limbs_mut(db1, y1)
 
 	local v1 = mul_limbs(da1, db1)
-	da1 = add_limbs(da1, x2, true)
-	db1 = add_limbs(db1, y2, true)
+	da1 = add_limbs_mut(da1, x2)
+	db1 = add_limbs_mut(db1, y2)
 
-	local v2 = sub_limbs(add_limbs(da1, da1, true), x0, true)
-	v2 = mul_limbs(v2, sub_limbs(add_limbs(db1, db1, true), y0, true))
+	local v2 = sub_limbs_mut(add_limbs_mut(da1, da1), x0)
+	v2 = mul_limbs(v2, sub_limbs_mut(add_limbs_mut(db1, db1), y0))
 
 	-- interpolation (all divisions here are single-limb, i.e. linear)
 	-- step 1: v2 = (v2 - vm1) / 3
 	if vm1_neg then
 		v2 = add_limbs(v2, vm1)
 	else
-		sub_limbs(v2, vm1, true)
+		sub_limbs_mut(v2, vm1)
 	end
 	div_by_int_exact(v2, 3, true, "internal error: Toom-3 interpolation exact /3 failed")
 	-- step 2: tm1 = (v1 - vm1) / 2
 	local tm1 = div_by_int_exact(vm1_neg and add_limbs(v1, vm1) or sub_limbs(v1, vm1), 2, true, "internal error: Toom-3 interpolation exact /2 (tm1) failed")
-	v1 = sub_limbs(v1, v0, true)
+	v1 = sub_limbs_mut(v1, v0)
 
-	div_by_int_exact(sub_limbs(v2, v1, true), 2, true, "internal error: Toom-3 interpolation exact /2 (v2) failed")
-	v1 = sub_limbs(sub_limbs(v1, tm1, true), vinf, true)
-	v2 = sub_limbs(v2, add_limbs(vinf, vinf), true)
-	tm1 = sub_limbs(tm1, v2, true)
+	div_by_int_exact(sub_limbs_mut(v2, v1), 2, true, "internal error: Toom-3 interpolation exact /2 (v2) failed")
+	v1 = sub_limbs_mut(sub_limbs_mut(v1, tm1), vinf)
+	v2 = sub_limbs_mut(v2, add_limbs(vinf, vinf))
+	tm1 = sub_limbs_mut(tm1, v2)
 
 	-- recombine
 	local result = lshift_limbs(vinf, k)
-	result = add_limbs(result, v2, true);  result = lshift_limbs(result, k)
-	result = add_limbs(result, v1, true);  result = lshift_limbs(result, k)
-	result = add_limbs(result, tm1, true); result = lshift_limbs(result, k)
-	result = add_limbs(result, v0, true)
+	result = add_limbs_mut(result, v2);  result = lshift_limbs(result, k)
+	result = add_limbs_mut(result, v1);  result = lshift_limbs(result, k)
+	result = add_limbs_mut(result, tm1); result = lshift_limbs(result, k)
+	result = add_limbs_mut(result, v0)
 	return result
 end
 
@@ -522,28 +552,28 @@ local function div_bz_3n2n(
 	b1: {number}, b2: {number}
 ): ({number}, {number})
 	local n = #b2
-	local B = add_limbs(lshift_limbs(b1, n), b2, true)
+	local B = add_limbs_mut(lshift_limbs(b1, n), b2)
 
 	local q: {number}, R: {number}, D: {number}
 	if lt_abs(a1, b1) then
-		local a1a2 = add_limbs(lshift_limbs(a1, n), a2, true)
+		local a1a2 = add_limbs_mut(lshift_limbs(a1, n), a2)
 		q, R = div_bz_2n1n(a1a2, b1)
 		D = mul_limbs(q, b2)
 	else
 		q = tcreate(n, BASE_MASK)
-		R = lshift_limbs(sub_limbs(a1, b1, true), n)
-		R = add_limbs(add_limbs(R, a1, true), a2, true)
-		D = sub_limbs(lshift_limbs(b2, n), b2, true)
+		R = lshift_limbs(sub_limbs_mut(a1, b1), n)
+		R = add_limbs_mut(add_limbs_mut(R, a1), a2)
+		D = sub_limbs_mut(lshift_limbs(b2, n), b2)
 	end
 
-	R = add_limbs(lshift_limbs(R, n), a3, true)
+	R = add_limbs_mut(lshift_limbs(R, n), a3)
 
 	while lt_abs(R, D) do
-		sub_limbs(q, {1}, true)
-		add_limbs(R, B, true)
+		sub_limbs_mut(q, {1})
+		add_limbs_mut(R, B)
 	end
 
-	sub_limbs(R, D, true)
+	sub_limbs_mut(R, D)
 	return q, R
 end
 
@@ -563,7 +593,7 @@ div_bz_2n1n = function(A: {number}, B: {number}): ({number}, {number})
 	local r1, r2 = get_upper(r, k), get_lower(r, k)
 	local q2, S = div_bz_3n2n(r1, r2, a4, b1, b2)
 
-	local Q = add_limbs(lshift_limbs(q1, k), q2, true)
+	local Q = add_limbs_mut(lshift_limbs(q1, k), q2)
 	return Q, S
 end
 
@@ -594,9 +624,9 @@ local function div_burnikel(A: {number}, B: {number}): ({number}, {number})
 	local quotient: {number} = {}
 	for i = t - 2, 0, -1 do
 		local ai1 = get_slice(aShifted, i * n + 1, (i + 1) * n)
-		z = add_limbs(lshift_limbs(z, n), ai1, true)
+		z = add_limbs_mut(lshift_limbs(z, n), ai1)
 		local qi, ri = div_bz_2n1n(z, bShifted)
-		quotient = add_limbs(quotient, lshift_limbs(qi, i * n), true)
+		quotient = add_limbs_mut(quotient, lshift_limbs(qi, i * n))
 		z = ri
 	end
 
@@ -671,22 +701,22 @@ local function sqrt_karatsuba(n: {number}): ({number}, {number})
 
 	local s1, r1 = sqrt_karatsuba(a3a2)
 
-	local r1b = add_limbs(lshift_limbs(r1, m), a1, true)
+	local r1b = add_limbs_mut(lshift_limbs(r1, m), a1)
 	local ds1 = add_limbs(s1, s1)
 	local q, u = div_limbs(r1b, ds1)
 
-	local s = add_limbs(lshift_limbs(s1, m), q, true)
+	local s = add_limbs_mut(lshift_limbs(s1, m), q)
 
 	local qSq = mul_limbs(q, q)
-	local r2 = add_limbs(lshift_limbs(u, m), a0, true)
+	local r2 = add_limbs_mut(lshift_limbs(u, m), a0)
 
 	-- q can overshoot by more than 1; keep correcting until r2 - qSq is non-negative.
 	while lt_abs(r2, qSq) do
-		r2 = add_limbs(r2, add_limbs(s, s), true)
-		sub_limbs(r2, {1}, true)
-		s = sub_limbs(s, {1}, true)
+		r2 = add_limbs_mut(r2, add_limbs(s, s))
+		sub_limbs_mut(r2, {1})
+		s = sub_limbs_mut(s, {1})
 	end
-	r2 = sub_limbs(r2, qSq, true)
+	r2 = sub_limbs_mut(r2, qSq)
 
 	return s, r2
 end
@@ -837,7 +867,7 @@ local function from_string_base(str: string, base: number, negative: boolean): B
 			strip_zeros(acc)
 		end
 		if dv > 0 then
-			acc = add_limbs(acc, {dv}, true)
+			acc = add_limbs_mut(acc, {dv})
 		end
 	end
 	return from_raw(acc, negative and -1 or 1)
@@ -1071,7 +1101,7 @@ function core.sub(a: Bint, b: Bint): Bint
 end
 
 --- Add b to a in-place.
---- Avoids allocation when signs match or |a| >= |b|.
+--- Reuses a.limbs in-place for sign-matched adds and dominant-magnitude subtraction.
 --- @param a The Bint to mutate.
 --- @param b The value to add.
 --- @return a after addition.
@@ -1083,7 +1113,7 @@ function core.add_mut(a: Bint, b: Bint): Bint
 		return a
 	end
 	if as == bs then
-		a.limbs = add_limbs(a.limbs, b.limbs, true)  -- extends a.limbs in-place, no new array
+		a.limbs = add_limbs_mut(a.limbs, b.limbs)  -- extends a.limbs in-place, no new array
 		return a
 	end
 	local cmp = cmp_abs(a.limbs, b.limbs)
@@ -1091,7 +1121,7 @@ function core.add_mut(a: Bint, b: Bint): Bint
 		a.limbs = {}; a.signum = 0; return a
 	end
 	if cmp > 0 then
-		sub_limbs(a.limbs, b.limbs, true)  -- shrinks a.limbs in-place, no new array
+		sub_limbs_mut(a.limbs, b.limbs)  -- shrinks a.limbs in-place, no new array
 		if #a.limbs == 0 then a.signum = 0 end
 		return a
 	end
@@ -1113,7 +1143,7 @@ function core.sub_mut(a: Bint, b: Bint): Bint
 		return a
 	end
 	if as == bs then
-		a.limbs = add_limbs(a.limbs, b.limbs, true)
+		a.limbs = add_limbs_mut(a.limbs, b.limbs)
 		return a
 	end
 	local cmp = cmp_abs(a.limbs, b.limbs)
@@ -1121,7 +1151,7 @@ function core.sub_mut(a: Bint, b: Bint): Bint
 		a.limbs = {}; a.signum = 0; return a
 	end
 	if cmp > 0 then
-		sub_limbs(a.limbs, b.limbs, true)
+		sub_limbs_mut(a.limbs, b.limbs)
 		if #a.limbs == 0 then a.signum = 0 end
 		return a
 	end
@@ -1236,7 +1266,7 @@ function core.divmod(a: Bint, b: Bint): (Bint, Bint)
 	r = correct_remainder(as, bs, r, b)
 	if as ~= bs and r.signum ~= 0 then
 		-- floor: push quotient one further toward −∞
-		q.limbs = add_limbs(q.limbs, {1}, true)
+		q.limbs = add_limbs_mut(q.limbs, {1})
 		strip_zeros(q.limbs)
 	end
 	q.signum = as * bs > 0 and 1 or -1
@@ -1457,7 +1487,7 @@ function core.rshift(a: Bint, n: number): Bint
 
 	-- For negative numbers, arithmetic right shift is floor(a / 2^n) = -ceil(|a| / 2^n).
 	if had_remainder then
-		q_limbs = add_limbs(q_limbs, {1}, true)
+		q_limbs = add_limbs_mut(q_limbs, {1})
 	end
 	return from_raw(q_limbs, -1)
 end
@@ -1839,7 +1869,7 @@ local function divmod_with(a: Bint, b: Bint, raw_div: ({number}, {number}) -> ({
 	local r = from_raw(r_limbs, as)
 	r = correct_remainder(as, bs, r, b)
 	if as ~= bs and r.signum ~= 0 then
-		q.limbs = add_limbs(q.limbs, {1}, true)
+		q.limbs = add_limbs_mut(q.limbs, {1})
 		strip_zeros(q.limbs)
 	end
 	q.signum = as * bs > 0 and 1 or -1
