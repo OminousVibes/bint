@@ -50,7 +50,6 @@ local BASE          = 2^24                  -- 16777216; limb*limb < 2^53 (safe 
 local BASE_MASK     = 0xFFFFFF              -- BASE - 1
 local BASE_POW      = 24
 local RADIX_CHUNK   = 1e8                   -- 10^8; for decimal I/O chunking
-local MINADD_OFFSET = 0                     -- MinAdd fast path threshold (limb count diff)
 local KARATSUBA_THR = 44                    -- switch to Karatsuba (limbs)
 local TOOM3_THR     = 124                   -- switch to Toom-3 (limbs)
 local SQRT_KAR_THR  = 4                     -- Karatsuba sqrt threshold (limbs)
@@ -230,76 +229,65 @@ end
 -- Add two unsigned limb arrays. in_place=true mutates the longer array.
 local function add_limbs(a: {number}, b: {number}, in_place: boolean?): {number}
 	local an, bn = #a, #b
-	local result: {number}
-
-	-- always iterate the longer array as self, shorter as term
-	local self, term
-	if an < bn then
-		result = tclone(b)
-		self, term = b, a
-	else
-		result = in_place and a or tclone(a)
-		self, term = a, b
+	if bn > an then
+		a, b = b, a
+		an, bn = bn, an
+		in_place = false
 	end
+	local result: {number} = in_place and a or tclone(a)
+	if bn == 0 then return result end
 
-	-- MinAdd: when arrays differ by > MINADD_OFFSET, skip the (term[i] or 0) branch
-	if mabs(bn - an) > MINADD_OFFSET then
-		-- MinAdd path: only iterate term, then carry-propagate in result
-		local sum = 0
-		for i, yLimb in term do
-			sum += result[i] + yLimb
-			if sum >= BASE then
-				result[i] = sum - BASE
-				sum = 1
-			else
-				result[i] = sum
-				sum = 0
-			end
-		end
-		if sum > 0 then
-			local idx = #term
-			while true do
-				idx += 1
-				sum = (result[idx] or 0) + 1
-				if sum >= BASE then
-					result[idx] = sum - BASE
-				else
-					result[idx] = sum
-					break
-				end
-			end
-		end
-		return result
-	end
-
-	-- Standard path
+	-- GMP-style split loop: process the shared prefix, then propagate carry through the tail only if needed.
 	local carry = 0
-	for i, selfLimb in self do
-		carry += selfLimb + (term[i] or 0)
-		if carry >= BASE then
-			result[i] = carry - BASE
+	for i = 1, bn do
+		local s = result[i] + b[i] + carry
+		if s >= BASE then
+			result[i] = s - BASE
 			carry = 1
 		else
-			result[i] = carry
+			result[i] = s
 			carry = 0
 		end
 	end
-	if carry > 0 then tinsert(result, carry) end
+	if carry ~= 0 then
+		for i = bn + 1, an do
+			local s = result[i] + 1
+			if s >= BASE then
+				result[i] = s - BASE
+			else
+				result[i] = s
+				return result
+			end
+		end
+		result[an + 1] = 1
+	end
 	return result
 end
 
 -- Subtract unsigned: a - b, requires |a| >= |b|. in_place mutates a.
 local function sub_limbs(a: {number}, b: {number}, in_place: boolean?): {number}
+	local an, bn = #a, #b
 	local result = in_place and a or tclone(a)
-	local diff = 0
-	for i, selfDigit in result do
-		diff += selfDigit - (b[i] or 0)
-		if diff < 0 then
-			result[i] = diff + BASE
-			diff = -1
+	local borrow = 0
+	for i = 1, bn do
+		local d = result[i] - b[i] + borrow
+		if d < 0 then
+			result[i] = d + BASE
+			borrow = -1
 		else
-			result[i] = diff
-			diff = 0
+			result[i] = d
+			borrow = 0
+		end
+	end
+	if borrow ~= 0 then
+		for i = bn + 1, an do
+			local d = result[i] - 1
+			if d < 0 then
+				result[i] = d + BASE
+			else
+				result[i] = d
+				break
+			end
 		end
 	end
 	strip_zeros(result)
