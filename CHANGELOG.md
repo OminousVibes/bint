@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2026-02-24
+
+### Changed
+
+- Error-path argument checks in `bint` constructors/converters and division wrappers now use explicit `error(..., 2)` guards instead of `assert(...)`, preserving caller-facing stack locations and consistent messages.
+- Documentation now clarifies that direct `algorithms.*` wrappers force the named algorithm at the top-level entry point, while recursive subproblems may still dispatch/fallback internally.
+
+### Fixed
+
+- Schoolbook/basecase multiplication now uses a split-accumulator inner loop to avoid Luau double-precision integer loss in worst-case columns (for example `(BASE^n - 1)^2`), which also fixes downstream Karatsuba and Toom-3 paths that recurse into basecase multiplication.
+- Knuth division now handles the D3 quotient-estimate saturation/equality-path edge case safely when the tentative estimate reaches the limb base boundary.
+
 ## [0.2.0] - 2026-02-23
 
 ### Added

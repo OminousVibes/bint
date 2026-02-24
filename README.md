@@ -4,7 +4,7 @@ Arbitrary-precision signed integer library for Luau.
 
 `bint` stores integers as little-endian base-`2^24` limbs, so values can grow without fixed-width overflow. It supports idiomatic operators (`+`, `-`, `*`, `//`, `%`, `^`, comparisons), plus a lower-level `core` API with mutating and non-mutating functions.
 
-Latest release: `0.2.0`.
+Latest release: `0.2.1`.
 
 ## Features
 
@@ -73,7 +73,7 @@ For `roblox-ts` / TypeScript users, the standard non-mutating arithmetic/compari
 
 ### `algorithms` entry points
 
-Direct algorithm entry points that bypass automatic threshold dispatch. Each function has the same contract as its `core` counterpart but always routes to the named algorithm regardless of operand size. Useful for benchmarking threshold crossover points and testing algorithm correctness independently.
+Direct algorithm entry points that bypass automatic threshold dispatch at the top-level call. Each function has the same contract as its `core` counterpart and forces the named top-level algorithm regardless of operand size; recursive subproblems may still dispatch/fallback internally. Useful for benchmarking threshold crossover points and validating specific algorithm entry paths.
 
 - Multiplication: `algorithms.mul_basecase`, `algorithms.mul_karatsuba`, `algorithms.mul_toom3`
 - Division: `algorithms.div_knuth`, `algorithms.div_burnikel`
