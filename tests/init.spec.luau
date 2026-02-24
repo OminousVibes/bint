@@ -1716,6 +1716,35 @@ return function(t)
 				end
 			end)
 
+			it("mul_basecase: (BASE^n - 1)^2 precision regression for Comba-style accumulator", function()
+				-- (BASE^n - 1) is represented as n limbs all equal to BASE-1.
+				-- Its self-product hits the maximum column weight at the center column.
+				-- With the old single-accumulator code, at n=35 the center-column sum reaches
+				-- 35*(BASE-1)^2 ~ 35*2^48 > 2^53, losing exact integer precision.
+				-- Tested via algorithms.mul_basecase (direct) and via the full dispatch chain.
+				for _, n in ipairs({1, 10, 35}) do
+					local limbs = table.create(n, BASE - 1)
+					local a = bint.from_limbs(limbs, 1)
+					expect(S(algorithms.mul_basecase(a, a))).to.equal(S(naive_mul(a, a)))
+				end
+			end)
+
+			it("mul: (BASE^n - 1)^2 precision regression across Karatsuba and Toom-3 dispatch", function()
+				-- Same worst-case all-(BASE-1) pattern exercised through the full dispatch chain.
+				-- Karatsuba and Toom-3 recurse into mul_limbs_basecase, so the fix must propagate.
+				for _, n in ipairs({35, 70, 100, 140}) do
+					local limbs = table.create(n, BASE - 1)
+					local a = bint.from_limbs(limbs, 1)
+					local expected = S(naive_mul(a, a))
+					expect(S(core.mul(a, a))).to.equal(expected)
+					if n <= 123 then
+						expect(S(algorithms.mul_karatsuba(a, a))).to.equal(expected)
+					else
+						expect(S(algorithms.mul_toom3(a, a))).to.equal(expected)
+					end
+				end
+			end)
+
 			--## Division
 
 			it("div_knuth and div_burnikel throw on division by zero", function()
@@ -1763,6 +1792,36 @@ return function(t)
 						expect(S(core.add(core.mul(q, b), r))).to.equal(S(a))
 						expect_floor_remainder_range(r, b)
 					end
+				end
+			end)
+
+			it("div_knuth: D3 qhat-saturation edge-shaped vectors remain correct", function()
+				-- These vectors are motivated by Knuth D3 qhat-saturation/equality-path edge shapes.
+				-- Using divisors with leading limb BASE-1 keeps D=1 (no normalization scaling), so
+				-- Vnn = BASE-1 and the quotient estimate is biased toward the qhat=BASE boundary.
+				-- This test validates correctness (identity, remainder bounds, core.divmod agreement);
+				-- it does not assert that the equality-path branch executes for every case.
+				local cases = {
+					-- 1-limb divisor
+					{{0, BASE - 1, BASE - 1}, {BASE - 1}},
+					{{BASE - 1, BASE - 1, BASE - 1}, {BASE - 1}},
+					{{BASE - 1, 0, BASE - 1}, {BASE - 1}},
+					-- 2-limb divisor with leading limb BASE-1
+					{{0, 0, BASE - 1, BASE - 1}, {0, BASE - 1}},
+					{{0, BASE - 1, BASE - 1, BASE - 1}, {0, BASE - 1}},
+					{{BASE - 1, BASE - 1, BASE - 1, BASE - 1}, {0, BASE - 1}},
+				}
+				for _, c in ipairs(cases) do
+					local a = bint.from_limbs(c[1], 1)
+					local b = bint.from_limbs(c[2], 1)
+					local q, r = algorithms.div_knuth(a, b)
+					-- Identity: a = q*b + r
+					expect(S(core.add(core.mul(q, b), r))).to.equal(S(a))
+					-- Remainder bounds: 0 <= r < b
+					expect_floor_remainder_range(r, b)
+					-- Must agree with core.divmod
+					local qref, rref = core.divmod(a, b)
+					expect(S(q)).to.equal(S(qref)); expect(S(r)).to.equal(S(rref))
 				end
 			end)
 
@@ -1968,6 +2027,30 @@ return function(t)
 					local tt = algorithms.mul_toom3(a, b)
 					expect_bint_eq(tt, kt)
 					expect_bint_eq(core.mul(a, b), tt)
+				end
+			end)
+
+			it("div_knuth D3 qhat-saturation-biased stress remains correct", function()
+				-- Divisors with leading limb BASE-1 are already normalized (D=1), so Vnn = BASE-1.
+				-- Dividends are also generated with leading limb BASE-1 to increase the chance of
+				-- equality-path opportunities in some iterations.
+				-- This verifies correctness under the bias; branch execution is not asserted here.
+				for trial = 1, 50 do
+					local vlen = 2 + (rnd() % 4)
+					local vlimbs = make_limbs(vlen - 1, trial * 1009 + 7)
+					vlimbs[vlen] = BASE - 1
+					local bv = bint.from_limbs(vlimbs, 1)
+
+					local ulen = vlen + 1 + (rnd() % 5)
+					local ulimbs = make_limbs(ulen - 1, trial * 2003 + 13)
+					ulimbs[ulen] = BASE - 1
+					local av = bint.from_limbs(ulimbs, 1)
+
+					local q, r = algorithms.div_knuth(av, bv)
+					expect(S(core.add(core.mul(q, bv), r))).to.equal(S(av))
+					expect_floor_remainder_range(r, bv)
+					local qref, rref = core.divmod(av, bv)
+					expect(S(q)).to.equal(S(qref)); expect(S(r)).to.equal(S(rref))
 				end
 			end)
 

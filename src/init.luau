@@ -136,6 +136,14 @@ local function div_by_int(limbs: {number}, d: number, in_place: boolean?): ({num
 	return q, {carry}
 end
 
+-- Exact single-limb division: asserts the remainder is zero and returns only the quotient.
+-- Use this wherever the division must be exact (e.g. Toom-3 interpolation, pow10 cursor).
+local function div_by_int_exact(limbs: {number}, d: number, in_place: boolean?, ctx: string?): {number}
+	local q, rem = div_by_int(limbs, d, in_place)
+	assert(#rem == 0, ctx or "internal error: exact division left a remainder")
+	return q
+end
+
 -- Mutable exact power-of-ten cursor used to correct __len estimates.
 -- This keeps __len exact without paying decimal conversion cost on every call.
 local POW10_CURSOR_EXP = 0
@@ -147,9 +155,7 @@ local function seek_pow10_limbs(exp: number): {number}
 		POW10_CURSOR_EXP += 1
 	end
 	while POW10_CURSOR_EXP > exp do
-		local q, rem = div_by_int(POW10_CURSOR_LIMBS, 10, true)
-		assert(#rem == 0, "internal error: pow10 cursor division left a remainder")
-		POW10_CURSOR_LIMBS = q
+		POW10_CURSOR_LIMBS = div_by_int_exact(POW10_CURSOR_LIMBS, 10, true, "internal error: pow10 cursor division left a remainder")
 		POW10_CURSOR_EXP -= 1
 	end
 	return POW10_CURSOR_LIMBS
@@ -301,6 +307,9 @@ end
 --## Multiplication (Karatsuba + Toom-Cook)
 
 -- Schoolbook O(n²) multiplication.
+-- Uses a Comba-style split-accumulator inner loop: each product a[j]*b[k] is split into
+-- its low limb (prod % BASE) and high limb (floor(prod / BASE)) before accumulation, keeping
+-- both running totals (c0, c1) well below 2^53 regardless of column weight.
 local function mul_limbs_basecase(a: {number}, b: {number}): {number}
 	local an, bn = #a, #b
 	local len = an + bn
@@ -308,18 +317,17 @@ local function mul_limbs_basecase(a: {number}, b: {number}): {number}
 	local bnm1 = bn - 1
 	local carry = 0
 	for i = 1, len do
-		local p = carry
+		local c0 = carry
+		local c1 = 0
 		local ip1 = i + 1
 		for j = mmax(i - bnm1, 1), mmin(i, an) do
-			p += a[j] * b[ip1 - j]
+			local prod = a[j] * b[ip1 - j]
+			c0 += prod % BASE
+			c1 += floor(prod / BASE)
 		end
-		if p >= BASE then
-			carry = floor(p / BASE)
-			result[i] = p % BASE
-		else
-			carry = 0
-			result[i] = p
-		end
+		c1 += floor(c0 / BASE)
+		result[i] = c0 % BASE
+		carry = c1
 	end
 	return result
 end
@@ -391,12 +399,12 @@ local function mul_limbs_toom3(x: {number}, y: {number}): {number}
 	else
 		sub_limbs(v2, vm1, true)
 	end
-	div_by_int(v2, 3, true)
+	div_by_int_exact(v2, 3, true, "internal error: Toom-3 interpolation exact /3 failed")
 	-- step 2: tm1 = (v1 - vm1) / 2
-	local tm1 = div_by_int(vm1_neg and add_limbs(v1, vm1) or sub_limbs(v1, vm1), 2, true)
+	local tm1 = div_by_int_exact(vm1_neg and add_limbs(v1, vm1) or sub_limbs(v1, vm1), 2, true, "internal error: Toom-3 interpolation exact /2 (tm1) failed")
 	v1 = sub_limbs(v1, v0, true)
 
-	div_by_int(sub_limbs(v2, v1, true), 2, true)
+	div_by_int_exact(sub_limbs(v2, v1, true), 2, true, "internal error: Toom-3 interpolation exact /2 (v2) failed")
 	v1 = sub_limbs(sub_limbs(v1, tm1, true), vinf, true)
 	v2 = sub_limbs(v2, add_limbs(vinf, vinf), true)
 	tm1 = sub_limbs(tm1, v2, true)
@@ -445,8 +453,16 @@ local function div_knuths(U: {number}, V: {number}): ({number}, {number})
 	for j = m, 0, -1 do
 		local nj1 = n + j + 1
 		local top = (Un[nj1] or 0) * BASE + (Un[nj1 - 1] or 0)
-		local qhat = floor(top / Vnn)
-		local rhat = top % Vnn
+		local qhat, rhat
+		if (Un[nj1] or 0) >= Vnn then
+			-- Knuth D3 equality path: quotient estimate saturates to BASE-1 to keep it
+			-- in range [0, BASE-1]. rhat is recomputed from the saturated estimate.
+			qhat = BASE - 1
+			rhat = top - (BASE - 1) * Vnn
+		else
+			qhat = floor(top / Vnn)
+			rhat = top % Vnn
+		end
 
 		if qhat == 0 then continue end
 
@@ -1785,9 +1801,10 @@ Bint.tostring		= bint.tostring
 --# ALGORITHMS
 -- Direct algorithm entry points. Each function has the same contract as its core.* counterpart
 -- (same sign handling, error conditions, and floor/isqrt semantics) but bypasses the automatic
--- threshold dispatch, always routing to the named algorithm regardless of operand size.
--- Use these for benchmarking threshold crossover points and for testing algorithm correctness
--- independently of dispatch decisions.
+-- threshold dispatch at the top-level entry point.
+-- Use these for benchmarking threshold crossover points and for validating the named
+-- top-level algorithm entry path. Recursive subproblems may still dispatch/fallback
+-- internally based on thresholds (see per-wrapper notes).
 
 -- Shared floor-division preamble used by div_knuth and div_burnikel.
 -- Mirrors core.divmod exactly; raw_div replaces the div_limbs dispatch call.
@@ -1832,12 +1849,14 @@ function algorithms.mul_basecase(a: Bint, b: Bint): Bint
 	return mul_wrap(a, b, mul_limbs_basecase)
 end
 
---- Multiply using Karatsuba O(n^1.585) algorithm, regardless of operand size.
+--- Multiply using Karatsuba O(n^1.585) algorithm at the top level, regardless of operand size.
+--- Recursive sub-problems are dispatched through mul_limbs and may use basecase internally.
 function algorithms.mul_karatsuba(a: Bint, b: Bint): Bint
 	return mul_wrap(a, b, mul_limbs_karatsuba)
 end
 
---- Multiply using Toom-Cook 3-way O(n^1.465) algorithm, regardless of operand size.
+--- Multiply using Toom-Cook 3-way O(n^1.465) algorithm at the top level, regardless of operand size.
+--- Recursive sub-problems are dispatched through mul_limbs and may use basecase or Karatsuba internally.
 function algorithms.mul_toom3(a: Bint, b: Bint): Bint
 	return mul_wrap(a, b, mul_limbs_toom3)
 end
