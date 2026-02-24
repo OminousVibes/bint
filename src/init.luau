@@ -136,11 +136,13 @@ local function div_by_int(limbs: {number}, d: number, in_place: boolean?): ({num
 	return q, {carry}
 end
 
--- Exact single-limb division: asserts the remainder is zero and returns only the quotient.
+-- Exact single-limb division: errors if the remainder is nonzero and returns only the quotient.
 -- Use this wherever the division must be exact (e.g. Toom-3 interpolation, pow10 cursor).
 local function div_by_int_exact(limbs: {number}, d: number, in_place: boolean?, ctx: string?): {number}
 	local q, rem = div_by_int(limbs, d, in_place)
-	assert(#rem == 0, ctx or "internal error: exact division left a remainder")
+	if #rem ~= 0 then
+		error(ctx or "internal error: exact division left a remainder", 2)
+	end
 	return q
 end
 
@@ -773,7 +775,9 @@ local bint = {}
 --- @raise An error if n is not a finite integer.
 function bint.from_int(n: number): Bint
 	if n == 0 then return make_zero() end
-	assert(n == floor(n) and n == n and mabs(n) ~= math.huge, "bint.from_int: expected an integer, got " .. tostring(n))
+	if n ~= floor(n) or n ~= n or mabs(n) == math.huge then
+		error("bint.from_int: expected an integer, got " .. tostring(n), 2)
+	end
 	if n == -1 then return setmetatable({ limbs = {1}, signum = -1 }, Bint) :: Bint end
 
 	local sign = msign(n)
@@ -858,9 +862,13 @@ end
 --- @return A new Bint.
 --- @raise An error if s is empty, contains invalid characters, or base is out of range.
 function bint.from_string(s: string, base: number?): Bint
-	assert(type(s) == "string", "bint.from_string: expected string")
+	if type(s) ~= "string" then
+		error("bint.from_string: expected string", 2)
+	end
 	local b = base or 10
-	assert(b >= 2 and b <= 36 and floor(b) == b, "bint.from_string: base must be an integer in 2–36")
+	if b < 2 or b > 36 or floor(b) ~= b then
+		error("bint.from_string: base must be an integer in 2–36", 2)
+	end
 
 	local negative = ssub(s, 1, 1) == "-"
 	if negative then s = ssub(s, 2) end
@@ -883,16 +891,19 @@ end
 function bint.from_limbs(limbs: {number}, signum: number?): Bint
 	local out: {number} = {}
 	for i, v in limbs do
-		assert(type(v) == "number" and v == floor(v) and v >= 0 and v < BASE,
-			sformat("bint.from_limbs: limb[%d]=%s out of range [0, BASE)", i, tostring(v)))
+		if type(v) ~= "number" or v ~= floor(v) or v < 0 or v >= BASE then
+			error(sformat("bint.from_limbs: limb[%d]=%s out of range [0, BASE)", i, tostring(v)), 2)
+		end
 		tinsert(out, v)
 	end
 	local sign: number
 	if signum ~= nil then
-		assert(signum == -1 or signum == 0 or signum == 1,
-			"bint.from_limbs: signum must be -1, 0, or 1")
-		assert(signum ~= 0 or #out == 0,
-			"bint.from_limbs: signum=0 requires empty limbs (use nil for auto)")
+		if signum ~= -1 and signum ~= 0 and signum ~= 1 then
+			error("bint.from_limbs: signum must be -1, 0, or 1", 2)
+		end
+		if signum == 0 and #out ~= 0 then
+			error("bint.from_limbs: signum=0 requires empty limbs (use nil for auto)", 2)
+		end
 		sign = signum
 	else
 		sign = #out > 0 and 1 or 0
@@ -1198,7 +1209,9 @@ end
 --- @raise An error on division by zero.
 function core.divmod(a: Bint, b: Bint): (Bint, Bint)
 	local as, bs = a.signum, b.signum
-	assert(bs ~= 0, "bint: division by zero")
+	if bs == 0 then
+		error("bint: division by zero", 2)
+	end
 
 	if as == 0 then return make_zero(), make_zero() end
 
@@ -1289,7 +1302,9 @@ end
 --- @raise An error on division by zero.
 function core.tdivmod(a: Bint, b: Bint): (Bint, Bint)
 	local as, bs = a.signum, b.signum
-	assert(bs ~= 0, "bint: division by zero")
+	if bs == 0 then
+		error("bint: division by zero", 2)
+	end
 
 	if as == 0 then return make_zero(), make_zero() end
 
@@ -1492,7 +1507,9 @@ end
 --- @raise An error if base is out of range.
 function bint.tostring(a: Bint, base: number?): string
 	local b = base or 10
-	assert(b >= 2 and b <= 36 and floor(b) == b, "bint.tostring: base must be an integer in 2–36")
+	if b < 2 or b > 36 or floor(b) ~= b then
+		error("bint.tostring: base must be an integer in 2–36", 2)
+	end
 
 	if a.signum == 0 then return "0" end
 
@@ -1594,7 +1611,9 @@ end
 --- @raise An error if s is not a string.
 --- @see bint.tole
 function bint.fromle(s: string): Bint
-	assert(type(s) == "string", "bint.fromle: expected string")
+	if type(s) ~= "string" then
+		error("bint.fromle: expected string", 2)
+	end
 	return fromle_bytes(s)
 end
 
@@ -1604,7 +1623,9 @@ end
 --- @raise An error if s is not a string.
 --- @see bint.tobe
 function bint.frombe(s: string): Bint
-	assert(type(s) == "string", "bint.frombe: expected string")
+	if type(s) ~= "string" then
+		error("bint.frombe: expected string", 2)
+	end
 	return fromle_bytes(sreverse(s))
 end
 
@@ -1810,7 +1831,9 @@ Bint.tostring		= bint.tostring
 -- Mirrors core.divmod exactly; raw_div replaces the div_limbs dispatch call.
 local function divmod_with(a: Bint, b: Bint, raw_div: ({number}, {number}) -> ({number}, {number})): (Bint, Bint)
 	local as, bs = a.signum, b.signum
-	assert(bs ~= 0, "bint: division by zero")
+	if bs == 0 then
+		error("bint: division by zero", 2)
+	end
 	if as == 0 then return make_zero(), make_zero() end
 	local U, V = a.limbs, b.limbs
 	local cmp = cmp_abs(U, V)
