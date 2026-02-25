@@ -33,10 +33,10 @@ Create a Bint with one of the constructor functions:
 
 Retrieve results with:
 
-* `bint.tostring(a, base?)` — decimal or any base-2..36 string
-* `bint.tonumber(a)`        — lua number (exact for |a| ≤ 2^53)
-* `bint.tole(a, trim?)` / `bint.tobe(a, trim?)` — byte strings
-* `bint.fromle(s)` / `bint.frombe(s)`           — from byte strings
+* `bint.to_string(a, base?)` — decimal or any base-2..36 string
+* `bint.to_number(a)`        — lua number (exact for |a| ≤ 2^53)
+* `bint.to_le(a, trim?)` / `bint.to_be(a, trim?)` — byte strings
+* `bint.from_le(s)` / `bint.from_be(s)`           — from byte strings
 
 All arithmetic metamethods (+, -, *, //, %, ^, unary -) and comparison
 metamethods (==, <, <=) are implemented. Low-level typed operations are
@@ -1575,10 +1575,10 @@ end
 --- @param[opt] base The numeric base (2–36). Defaults to 10.
 --- @return A string representation.
 --- @raise An error if base is out of range.
-function bint.tostring(a: Bint, base: number?): string
+function bint.to_string(a: Bint, base: number?): string
 	local b = base or 10
 	if b < 2 or b > 36 or floor(b) ~= b then
-		error("bint.tostring: base must be an integer in 2–36", 2)
+		error("bint.to_string: base must be an integer in 2–36", 2)
 	end
 
 	if a.signum == 0 then return "0" end
@@ -1632,8 +1632,8 @@ end
 --- @param a The Bint to serialize.
 --- @param[opt] trim If true, trailing zero bytes are stripped.
 --- @return A string of bytes.
---- @see bint.fromle
-function bint.tole(a: Bint, trim: boolean?): string
+--- @see bint.from_le
+function bint.to_le(a: Bint, trim: boolean?): string
 	local limbs = a.limbs
 	local parts: {string} = tcreate(#limbs, "") :: {string}
 	for i, limb in limbs do
@@ -1655,12 +1655,12 @@ end
 --- @param a The Bint to serialize.
 --- @param[opt] trim If true, leading zero bytes are stripped.
 --- @return A string of bytes.
---- @see bint.frombe
-function bint.tobe(a: Bint, trim: boolean?): string
-	return sreverse(bint.tole(a, trim))
+--- @see bint.from_be
+function bint.to_be(a: Bint, trim: boolean?): string
+	return sreverse(bint.to_le(a, trim))
 end
 
--- Shared implementation for fromle/frombe (caller reverses if needed).
+-- Shared implementation for from_le/from_be (caller reverses if needed).
 local function fromle_bytes(s: string): Bint
 	local n = slen(s)
 	local limbs: {number} = {}
@@ -1679,10 +1679,10 @@ end
 --- @param s A string of bytes representing the magnitude.
 --- @return A new Bint.
 --- @raise An error if s is not a string.
---- @see bint.tole
-function bint.fromle(s: string): Bint
+--- @see bint.to_le
+function bint.from_le(s: string): Bint
 	if type(s) ~= "string" then
-		error("bint.fromle: expected string", 2)
+		error("bint.from_le: expected string", 2)
 	end
 	return fromle_bytes(s)
 end
@@ -1691,10 +1691,10 @@ end
 --- @param s A string of bytes representing the magnitude.
 --- @return A new Bint.
 --- @raise An error if s is not a string.
---- @see bint.tobe
-function bint.frombe(s: string): Bint
+--- @see bint.to_be
+function bint.from_be(s: string): Bint
 	if type(s) ~= "string" then
-		error("bint.frombe: expected string", 2)
+		error("bint.from_be: expected string", 2)
 	end
 	return fromle_bytes(sreverse(s))
 end
@@ -1703,7 +1703,7 @@ end
 --- Exact for magnitudes up to 2^53; larger values lose precision.
 --- @param a The Bint to convert.
 --- @return A lua number.
-function bint.tonumber(a: Bint): number
+function bint.to_number(a: Bint): number
 	if a.signum == 0 then return 0 end
 	local limbs = a.limbs
 	local n = #limbs
@@ -1719,7 +1719,7 @@ function bint.tonumber(a: Bint): number
 		end
 	end
 	-- 4+ limbs or 3-limb overflow: fall back to string (precision loss)
-	return tonumber(bint.tostring(a)) :: number
+	return tonumber(bint.to_string(a)) :: number
 end
 
 --- Decompose a Bint into lossy scientific notation: coefficient × 10^exponent.
@@ -1829,9 +1829,9 @@ Bint.__le = function(a: BintArg, b: BintArg): boolean
 end
 
 --- Convert to a decimal string.
---- @see bint.tostring
+--- @see bint.to_string
 Bint.__tostring = function(a: Bint): string
-	return bint.tostring(a)
+	return bint.to_string(a)
 end
 
 --- Return the number of decimal digits (metamethod for #).
@@ -1905,7 +1905,11 @@ Bint.lshift			= core.lshift
 Bint.rshift			= core.rshift
 Bint.lshift_words	= core.lshift_words
 Bint.rshift_words	= core.rshift_words
-Bint.tostring		= bint.tostring
+Bint.to_string		= bint.to_string
+Bint.to_number		= bint.to_number
+Bint.to_sci			= bint.to_sci
+Bint.to_le			= bint.to_le
+Bint.to_be			= bint.to_be
 
 --# ALGORITHMS
 -- Direct algorithm entry points. Each function has the same contract as its core.* counterpart

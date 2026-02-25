@@ -32,7 +32,11 @@ export interface Bint {
 	rshift(n: number): Bint;
 	lshift_words(n: number): Bint;
 	rshift_words(n: number): Bint;
-	tostring(base?: number): string;
+	to_string(base?: number): string;
+	to_number(): number;
+	to_sci(): LuaTuple<[number, number]>;
+	to_le(trim?: boolean): string;
+	to_be(trim?: boolean): string;
 }
 
 interface BintModule {
@@ -46,12 +50,13 @@ interface BintModule {
 	one(): Bint;
 	new: (v: BintArg) => Bint;
 
-	tostring(a: Bint, base?: number): string;
-	tole(a: Bint, trim?: boolean): string;
-	tobe(a: Bint, trim?: boolean): string;
-	fromle(s: string): Bint;
-	frombe(s: string): Bint;
-	tonumber(a: Bint): number;
+	to_string(a: Bint, base?: number): string;
+	to_le(a: Bint, trim?: boolean): string;
+	to_be(a: Bint, trim?: boolean): string;
+	from_le(s: string): Bint;
+	from_be(s: string): Bint;
+	to_number(a: Bint): number;
+	to_sci(a: Bint): LuaTuple<[number, number]>;
 }
 
 interface BintCore {

@@ -13,7 +13,7 @@ return function(t)
 	local TAG_STRESS = {"stress"}
 
 	local function S(x)
-		return bint.tostring(x)
+		return bint.to_string(x)
 	end
 
 	local function _B(v)
@@ -517,7 +517,7 @@ return function(t)
 
 		--## String and base conversion
 		describe.tags(TAG_FULL, "string/base conversion", function()
-			it("tostring/from_string should round-trip across bases for many values", function()
+			it("to_string/from_string should round-trip across bases for many values", function()
 				local bases = { 2, 3, 8, 10, 16, 36 }
 				local samples = {
 					"0",
@@ -534,7 +534,7 @@ return function(t)
 				for _, s in ipairs(samples) do
 					local x = bint(s)
 					for _, base in ipairs(bases) do
-						local encoded = bint.tostring(x, base)
+						local encoded = bint.to_string(x, base)
 						local decoded = bint.from_string(encoded, base)
 						expect(S(decoded)).to.equal(S(x))
 					end
@@ -546,7 +546,7 @@ return function(t)
 				for _ = 1, 60 do
 					local x = bint(rand_decimal(80))
 					for _, base in ipairs(bases) do
-						local encoded = bint.tostring(x, base)
+						local encoded = bint.to_string(x, base)
 						local decoded = bint.from_string(encoded, base)
 						expect(S(decoded)).to.equal(S(x))
 					end
@@ -555,10 +555,10 @@ return function(t)
 
 			it("base parameter bounds should be enforced", function()
 				expect(function()
-					bint.tostring(bint.one(), 1)
+					bint.to_string(bint.one(), 1)
 				end).to.throw()
 				expect(function()
-					bint.tostring(bint.one(), 37)
+					bint.to_string(bint.one(), 37)
 				end).to.throw()
 				expect(function()
 					bint.from_string("10", 1)
@@ -576,25 +576,25 @@ return function(t)
 					bint.from_string("ff", 16.9)
 				end).to.throw()
 				expect(function()
-					bint.tostring(bint("255"), 16.5)
+					bint.to_string(bint("255"), 16.5)
 				end).to.throw()
 				expect(function()
-					bint.tostring(bint("42"), 2.1)
+					bint.to_string(bint("42"), 2.1)
 				end).to.throw()
 			end)
 
-			it("tostring should use canonical lowercase digits and preserve sign", function()
-				expect(bint.tostring(bint("42"), 2)).to.equal("101010")
-				expect(bint.tostring(bint("-255"), 16)).to.equal("-ff")
-				expect(bint.tostring(bint("35"), 36)).to.equal("z")
-				expect(bint.tostring(bint("-35"), 36)).to.equal("-z")
+			it("to_string should use canonical lowercase digits and preserve sign", function()
+				expect(bint.to_string(bint("42"), 2)).to.equal("101010")
+				expect(bint.to_string(bint("-255"), 16)).to.equal("-ff")
+				expect(bint.to_string(bint("35"), 36)).to.equal("z")
+				expect(bint.to_string(bint("-35"), 36)).to.equal("-z")
 			end)
 		end)
 
 		--## Byte conversion
 		-- Magnitude-only little/big-endian serialisation and deserialisation.
 		describe.tags(TAG_FULL, "byte conversion", function()
-			it("tole/fromle and tobe/frombe should round-trip magnitudes", function()
+			it("to_le/from_le and to_be/from_be should round-trip magnitudes", function()
 				local samples = {
 					bint("0"),
 					bint("1"),
@@ -606,65 +606,65 @@ return function(t)
 
 				for _, x in ipairs(samples) do
 					local absX = core.abs(x)
-					local le = bint.tole(x)
-					local be = bint.tobe(x)
-					expect(S(bint.fromle(le))).to.equal(S(absX))
-					expect(S(bint.frombe(be))).to.equal(S(absX))
+					local le = bint.to_le(x)
+					local be = bint.to_be(x)
+					expect(S(bint.from_le(le))).to.equal(S(absX))
+					expect(S(bint.from_be(be))).to.equal(S(absX))
 				end
 			end)
 
 			it("trim should remove highest zero bytes in little-endian output", function()
 				local one = bint.one()
-				expect(string.len(bint.tole(one, false))).to.equal(3)
-				expect(string.len(bint.tole(one, true))).to.equal(1)
-				expect(bint.tole(bint.zero(), true)).to.equal("")
+				expect(string.len(bint.to_le(one, false))).to.equal(3)
+				expect(string.len(bint.to_le(one, true))).to.equal(1)
+				expect(bint.to_le(bint.zero(), true)).to.equal("")
 			end)
 
-			it("tole/fromle should round-trip a number with >2700 limbs (exceeds vararg limit)", function()
+			it("to_le/from_le should round-trip a number with >2700 limbs (exceeds vararg limit)", function()
 				-- 3 000 limbs × 3 bytes = 9 000 bytes; far above Lua's ~8 000-arg vararg limit
 				local limbs = table.create(3000, 1)
 				local big = bint.from_limbs(limbs, 1)
-				local le = bint.tole(big)
+				local le = bint.to_le(big)
 				expect(#le).to.equal(3000 * 3)
-				expect(S(bint.fromle(le))).to.equal(S(big))
-				local le_trim = bint.tole(big, true)
-				expect(S(bint.fromle(le_trim))).to.equal(S(big))
+				expect(S(bint.from_le(le))).to.equal(S(big))
+				local le_trim = bint.to_le(big, true)
+				expect(S(bint.from_le(le_trim))).to.equal(S(big))
 			end)
 
-			it("fromle/frombe should require string input", function()
+			it("from_le/from_be should require string input", function()
 				expect(function()
-					bint.fromle(123)
+					bint.from_le(123)
 				end).to.throw()
 				expect(function()
-					bint.frombe(123)
+					bint.from_be(123)
 				end).to.throw()
 			end)
 
 			it("byte conversion should preserve exact endianness and omit sign", function()
 				local x = bint.from_limbs({ 0x112233, 0x445566 })
-				local le = bint.tole(x)
-				local be = bint.tobe(x)
+				local le = bint.to_le(x)
+				local be = bint.to_be(x)
 
 				expect({ string.byte(le, 1, #le) }).to.equal({ 0x33, 0x22, 0x11, 0x66, 0x55, 0x44 })
 				expect({ string.byte(be, 1, #be) }).to.equal({ 0x44, 0x55, 0x66, 0x11, 0x22, 0x33 })
-				expect(S(bint.fromle(""))).to.equal("0")
-				expect(S(bint.frombe(""))).to.equal("0")
+				expect(S(bint.from_le(""))).to.equal("0")
+				expect(S(bint.from_be(""))).to.equal("0")
 
 				local neg = bint("-255")
 				local pos = bint("255")
-				expect(bint.tole(neg, true)).to.equal(bint.tole(pos, true))
-				expect(S(bint.fromle(bint.tole(neg, true)))).to.equal("255")
+				expect(bint.to_le(neg, true)).to.equal(bint.to_le(pos, true))
+				expect(S(bint.from_le(bint.to_le(neg, true)))).to.equal("255")
 			end)
 		end)
 
 			--## Tonumber and bit/word shifts
-			describe.tags(TAG_FULL, "tonumber and shifts", function()
-			it("tonumber should be exact up to 2^53 and return number type for bigger values", function()
-				expect(bint.tonumber(bint("9007199254740991"))).to.equal(9007199254740991)
-				expect(bint.tonumber(bint("9007199254740992"))).to.equal(9007199254740992)
+			describe.tags(TAG_FULL, "to_number and shifts", function()
+			it("to_number should be exact up to 2^53 and return number type for bigger values", function()
+				expect(bint.to_number(bint("9007199254740991"))).to.equal(9007199254740991)
+				expect(bint.to_number(bint("9007199254740992"))).to.equal(9007199254740992)
 
 				local huge = bint("1234567890123456789012345678901234567890")
-				expect(type(bint.tonumber(huge))).to.equal("number")
+				expect(type(bint.to_number(huge))).to.equal("number")
 			end)
 
 				it("word shifts should preserve sign and be inverse for exact shifted values", function()
@@ -1466,8 +1466,8 @@ return function(t)
 			end)
 		end)
 
-		--## __tostring and tonumber edge cases
-		describe.tags(TAG_FAST, "__tostring and tonumber edge cases", function()
+		--## __tostring and to_number edge cases
+		describe.tags(TAG_FAST, "__tostring and to_number edge cases", function()
 			it("tostring() metamethod should return the decimal representation", function()
 				expect(tostring(bint("42"))).to.equal("42")
 				expect(tostring(bint.zero())).to.equal("0")
@@ -1476,20 +1476,20 @@ return function(t)
 					.to.equal("1234567890123456789012345678901234567890")
 			end)
 
-			it("tonumber should be correct at zero and the negative 2^53 boundary", function()
-				expect(bint.tonumber(bint.zero())).to.equal(0)
-				expect(bint.tonumber(bint("-9007199254740991"))).to.equal(-9007199254740991)
-				expect(bint.tonumber(bint("-9007199254740992"))).to.equal(-9007199254740992)
+			it("to_number should be correct at zero and the negative 2^53 boundary", function()
+				expect(bint.to_number(bint.zero())).to.equal(0)
+				expect(bint.to_number(bint("-9007199254740991"))).to.equal(-9007199254740991)
+				expect(bint.to_number(bint("-9007199254740992"))).to.equal(-9007199254740992)
 				local huge_neg = bint("-1234567890123456789012345678901234567890")
-				expect(type(bint.tonumber(huge_neg))).to.equal("number")
+				expect(type(bint.to_number(huge_neg))).to.equal("number")
 			end)
 
 			it("from_int should round-trip exactly at the 2^53-1 boundary", function()
 				local max_safe = 9007199254740991
 				expect(S(bint.from_int(max_safe))).to.equal("9007199254740991")
 				expect(S(bint.from_int(-max_safe))).to.equal("-9007199254740991")
-				expect(bint.tonumber(bint.from_int(max_safe))).to.equal(max_safe)
-				expect(bint.tonumber(bint.from_int(-max_safe))).to.equal(-max_safe)
+				expect(bint.to_number(bint.from_int(max_safe))).to.equal(max_safe)
+				expect(bint.to_number(bint.from_int(-max_safe))).to.equal(-max_safe)
 			end)
 
 			it("from_int should convert the current Lua number value (use from_string for exact >2^53 literals)", function()
@@ -1653,9 +1653,9 @@ return function(t)
 			end)
 		end)
 
-		--## Instance methods, __len, tobe trim, and Toom-3 boundary
-		-- Covers :le(), :clone(), :tostring(base), :tdiv()/:tmod(), __len at BASE edges, tobe trim, and the 123/124/125-limb mul boundary.
-		describe.tags(TAG_FULL, "instance methods, __len, tobe trim, and toom3 boundary", function()
+		--## Instance methods, __len, to_be trim, and Toom-3 boundary
+		-- Covers :le(), :clone(), :to_string(base), :tdiv()/:tmod(), __len at BASE edges, to_be trim, and the 123/124/125-limb mul boundary.
+		describe.tags(TAG_FULL, "instance methods, __len, to_be trim, and toom3 boundary", function()
 			it("a:le(b) should return correct comparisons with coercion", function()
 				local a = bint("10")
 				expect(a:le(10)).to.equal(true)
@@ -1675,12 +1675,38 @@ return function(t)
 				expect(S(a)).to.equal("12345678901234567891")
 			end)
 
-			it("a:tostring(base) should produce non-decimal representations", function()
-				expect(bint("255"):tostring(16)).to.equal("ff")
-				expect(bint("-255"):tostring(16)).to.equal("-ff")
-				expect(bint("8"):tostring(2)).to.equal("1000")
-				expect(bint("35"):tostring(36)).to.equal("z")
-				expect(bint.zero():tostring(16)).to.equal("0")
+			it("a:to_number() should match bint.to_number(a)", function()
+				expect(bint("42"):to_number()).to.equal(42)
+				expect(bint("-999"):to_number()).to.equal(-999)
+				expect(bint.zero():to_number()).to.equal(0)
+			end)
+
+			it("a:to_sci() should match bint.to_sci(a)", function()
+				local c, e = bint("42"):to_sci()
+				expect(e).to.equal(1)
+				expect(math.abs(c - 4.2) < 1e-12).to.equal(true)
+
+				local c0, e0 = bint.zero():to_sci()
+				expect(c0).to.equal(0)
+				expect(e0).to.equal(0)
+			end)
+
+			it("a:to_le() and a:to_be() should match module-level calls", function()
+				local a = bint("16777217") -- BASE + 1
+				expect(a:to_le(false)).to.equal(bint.to_le(a, false))
+				expect(a:to_le(true)).to.equal(bint.to_le(a, true))
+				expect(a:to_be(false)).to.equal(bint.to_be(a, false))
+				expect(a:to_be(true)).to.equal(bint.to_be(a, true))
+				expect(bint.zero():to_le(true)).to.equal("")
+				expect(bint.zero():to_be(true)).to.equal("")
+			end)
+
+			it("a:to_string(base) should produce non-decimal representations", function()
+				expect(bint("255"):to_string(16)).to.equal("ff")
+				expect(bint("-255"):to_string(16)).to.equal("-ff")
+				expect(bint("8"):to_string(2)).to.equal("1000")
+				expect(bint("35"):to_string(36)).to.equal("z")
+				expect(bint.zero():to_string(16)).to.equal("0")
 			end)
 
 			it("a:tdiv(b) and a:tmod(b) should return the correct single value", function()
@@ -1701,12 +1727,12 @@ return function(t)
 				expect(#bint("100000000")).to.equal(9)
 			end)
 
-			it("tobe trim should parallel tole trim behavior", function()
+			it("to_be trim should parallel to_le trim behavior", function()
 				local one = bint.one()
-				expect(string.len(bint.tobe(one, false))).to.equal(3)
-				expect(string.len(bint.tobe(one, true))).to.equal(1)
-				expect(bint.tobe(bint.zero(), true)).to.equal("")
-				expect(S(bint.frombe(bint.tobe(bint("255"), true)))).to.equal("255")
+				expect(string.len(bint.to_be(one, false))).to.equal(3)
+				expect(string.len(bint.to_be(one, true))).to.equal(1)
+				expect(bint.to_be(bint.zero(), true)).to.equal("")
+				expect(S(bint.from_be(bint.to_be(bint("255"), true)))).to.equal("255")
 			end)
 
 			it("mul: karatsuba/toom3 threshold at 123/124/125 limbs, all 4 sign combos, match naive", function()
@@ -1994,7 +2020,7 @@ return function(t)
 			end
 
 			local function expect_exact_int(x, n)
-				expect(bint.tonumber(x)).to.equal(n)
+				expect(bint.to_number(x)).to.equal(n)
 			end
 
 			local function expect_bint_eq(a, b)
