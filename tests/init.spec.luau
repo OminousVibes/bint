@@ -859,6 +859,31 @@ return function(t)
 				expect_floor_remainder_range(rb, b)
 			end)
 
+			it("burnikel outer loop should handle top chunk >= divisor without invalid 2n/1n call", function()
+				-- Construct a Burnikel-sized divisor with sigma=1 and shift=0 (top limb BASE-1, length=512),
+				-- then make the dividend's top n-limb chunk exactly equal to the divisor. The first outer
+				-- loop step would violate div_bz_2n1n's precondition (z < BASE^n * B) without a fallback.
+				local n = 512
+				local b_limbs = make_limbs(n, 401)
+				b_limbs[n] = BASE - 1
+				local low_limbs = make_limbs(n, 433)
+				local a_limbs = table.create(n * 2)
+				for i = 1, n do
+					a_limbs[i] = low_limbs[i]
+					a_limbs[n + i] = b_limbs[i]
+				end
+
+				local a = bint.from_limbs(a_limbs, 1)
+				local b = bint.from_limbs(b_limbs, 1)
+				local qbz, rbz = algorithms.div_burnikel(a, b)
+				local qk, rk = algorithms.div_knuth(a, b)
+
+				expect(S(qbz)).to.equal(S(qk))
+				expect(S(rbz)).to.equal(S(rk))
+				expect(S(core.add(core.mul(qbz, b), rbz))).to.equal(S(a))
+				expect_floor_remainder_range(rbz, b)
+			end)
+
 			it("sqrt path: newton-sized values should satisfy isqrt inequalities", function()
 				local n = make_big(31, 239, 1)
 				local s = core.sqrt(n)

@@ -563,7 +563,8 @@ local function div_bz_3n2n(
 	else
 		q = tcreate(n, BASE_MASK)
 		R = lshift_limbs(sub_limbs_mut(a1, b1), n)
-		R = add_limbs_mut(add_limbs_mut(R, a1), a2)
+		-- R1 = A1A2 - (BASE^n - 1) * B1 = (A1 - B1) * BASE^n + A2 + B1
+		R = add_limbs_mut(add_limbs_mut(R, b1), a2)
 		D = sub_limbs_mut(lshift_limbs(b2, n), b2)
 	end
 
@@ -622,12 +623,20 @@ local function div_burnikel(A: {number}, B: {number}): ({number}, {number})
 
 	local t = mmax(ceil(r / n), 2)
 	local z = get_slice(aShifted, (t - 1) * n + 1, r)
+	local bzChunkLimit = lshift_limbs(bShifted, n) -- div_bz_2n1n requires z < BASE^n * bShifted
 
 	local quotient: {number} = {}
 	for i = t - 2, 0, -1 do
 		local ai1 = get_slice(aShifted, i * n + 1, (i + 1) * n)
 		z = add_limbs_mut(lshift_limbs(z, n), ai1)
-		local qi, ri = div_bz_2n1n(z, bShifted)
+		local qi: {number}
+		local ri: {number}
+		if lt_abs(z, bzChunkLimit) then
+			qi, ri = div_bz_2n1n(z, bShifted)
+		else
+			qi, ri = div_knuths(z, bShifted)
+			strip_zeros(qi)
+		end
 		quotient = add_limbs_mut(quotient, lshift_limbs(qi, i * n))
 		z = ri
 	end
