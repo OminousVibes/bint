@@ -182,6 +182,31 @@ local function get_slice(limbs: {number}, s: number, e: number): {number}
 	return tmove(limbs, s, e, 1, {})
 end
 
+-- Join disjoint blocks as hi * BASE^n + lo, where lo occupies at most n limbs.
+local function join_hi_lo(hi: {number}, lo: {number}, n: number): {number}
+	local z = lshift_limbs(hi, n)
+	if #lo > 0 then
+		tmove(lo, 1, #lo, 1, z)
+	end
+	return z
+end
+
+-- Exact bit length of an unsigned limb array.
+local function bitlen_limbs(limbs: {number}): number
+	local n = #limbs
+	if n == 0 then
+		return 0
+	end
+
+	local top = limbs[n]
+	local bits = 0
+	while top > 0 do
+		bits += 1
+		top = floor(top / 2)
+	end
+	return (n - 1) * BASE_POW + bits
+end
+
 -- Unsigned magnitude comparison. Returns -1, 0, or 1.
 local function cmp_abs(a: {number}, b: {number}): number
 	local an, bn = #a, #b
@@ -582,6 +607,26 @@ end
 -- Burnikel-Ziegler 2n/1n sub-step.
 div_bz_2n1n = function(A: {number}, B: {number}): ({number}, {number})
 	local bLen = #B
+	local aLen = #A
+
+	-- The outer driver can feed a short top chunk (<= n limbs) when the conceptual
+	-- block split introduces leading zero blocks. Handle those directly to avoid
+	-- paying recursive 2n/1n overhead on effectively n/1n inputs.
+	if aLen < bLen then
+		return {}, tclone(A)
+	end
+	if aLen == bLen then
+		local cmp = cmp_abs(A, B)
+		if cmp < 0 then
+			return {}, tclone(A)
+		elseif cmp == 0 then
+			return {1}, {}
+		end
+		local q, r = div_knuths(A, B)
+		strip_zeros(q)
+		return q, r
+	end
+
 	if bLen % 2 == 1 or bLen < BURNIKEL_THR then
 		return div_knuths(A, B)
 	end
@@ -618,28 +663,24 @@ local function div_burnikel(A: {number}, B: {number}): ({number}, {number})
 		aShifted = lshift_limbs(aShifted, shift)
 	end
 
-	local r = #aShifted
-	s = #bShifted
+	local nBits = n * BASE_POW
+	local t = mmax(floor((bitlen_limbs(aShifted) + nBits) / nBits), 2)
 
-	local t = mmax(ceil(r / n), 2)
-	local z = get_slice(aShifted, (t - 1) * n + 1, r)
-	local bzChunkLimit = lshift_limbs(bShifted, n) -- div_bz_2n1n requires z < BASE^n * bShifted
+	local aTop = get_slice(aShifted, (t - 1) * n + 1, t * n)
+	local zLow = get_slice(aShifted, (t - 2) * n + 1, (t - 1) * n)
+	local z = join_hi_lo(aTop, zLow, n)
 
 	local quotient: {number} = {}
-	for i = t - 2, 0, -1 do
-		local ai1 = get_slice(aShifted, i * n + 1, (i + 1) * n)
-		z = add_limbs_mut(lshift_limbs(z, n), ai1)
-		local qi: {number}
-		local ri: {number}
-		if lt_abs(z, bzChunkLimit) then
-			qi, ri = div_bz_2n1n(z, bShifted)
-		else
-			qi, ri = div_knuths(z, bShifted)
-			strip_zeros(qi)
-		end
+	for i = t - 2, 1, -1 do
+		local qi, ri = div_bz_2n1n(z, bShifted)
 		quotient = add_limbs_mut(quotient, lshift_limbs(qi, i * n))
-		z = ri
+		local ai1 = get_slice(aShifted, (i - 1) * n + 1, i * n)
+		z = join_hi_lo(ri, ai1, n)
 	end
+
+	local qi, ri = div_bz_2n1n(z, bShifted)
+	quotient = add_limbs_mut(quotient, qi)
+	z = ri
 
 	div_by_int(z, sigma, true)
 	-- The word-shift applied to both operands to align B to a block boundary
