@@ -558,6 +558,7 @@ local function div_bz_3n2n(
 	if lt_abs(a1, b1) then
 		local a1a2 = add_limbs_mut(lshift_limbs(a1, n), a2)
 		q, R = div_bz_2n1n(a1a2, b1)
+		strip_zeros(q)
 		D = mul_limbs(q, b2)
 	else
 		q = tcreate(n, BASE_MASK)
@@ -594,6 +595,7 @@ div_bz_2n1n = function(A: {number}, B: {number}): ({number}, {number})
 	local q2, S = div_bz_3n2n(r1, r2, a4, b1, b2)
 
 	local Q = add_limbs_mut(lshift_limbs(q1, k), q2)
+	strip_zeros(Q)
 	return Q, S
 end
 

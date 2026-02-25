@@ -2083,6 +2083,52 @@ return function(t)
 				end
 			end)
 
+			it("BZ deep recursion: strip trailing zero from quotient (non-canonical Q regression)", function()
+				-- Regression for non-canonical quotient arrays reaching mul_limbs via BZ internals.
+				-- Two paths produce trailing-zero quotients:
+				--   (a) div_knuths pre-allocates quotient with tcreate(m+1, 0) and doesn't strip;
+				--       when div_bz_2n1n falls back to Knuth (odd bLen or bLen < BURNIKEL_THR),
+				--       the unstripped quotient returns directly to div_bz_3n2n.
+				--   (b) div_bz_2n1n builds Q = lshift(q1,k)+q2; if q1 from the correction loop
+				--       had its top limb decremented to 0, Q inherits the trailing zero.
+				-- In both cases, mul_limbs(q, b2) in div_bz_3n2n receives an inflated array,
+				-- mis-dispatches to Toom-3, and lt_abs (length-first) corrupts the vm1 sign.
+
+				-- Case 1: deep BZ recursion (divisor >= 2×BURNIKEL_THR = 464 limbs).
+				-- Exercises path (b): recursive div_bz_2n1n → div_bz_3n2n → div_bz_2n1n.
+				for i = 1, 8 do
+					local signA = (i % 2 == 0) and 1 or -1
+					local signB = (i % 3 == 0) and -1 or 1
+					local a = make_big(960 + i, i * 211 + 7, signA)
+					local b = make_big(480, i * 223 + 11, signB)
+					local q, r = core.divmod(a, b)
+					expect(S(core.add(core.mul(q, b), r))).to.equal(S(a))
+					expect_floor_remainder_range(r, b)
+					local qt, rt = core.tdivmod(a, b)
+					expect(S(core.add(core.mul(qt, b), rt))).to.equal(S(a))
+					expect_trunc_remainder_range(rt, a, b)
+				end
+
+				-- Case 2: BZ with Knuth fallback producing unstripped quotient.
+				-- Exercises path (a): div_bz_2n1n falls to div_knuths (odd or small b1),
+				-- returning a non-canonical q to div_bz_3n2n → mul_limbs(q, b2).
+				-- Divisor sized so the recursive b1 = upper(B, k) has odd length or < BURNIKEL_THR.
+				for _, pr in ipairs({{500, 233}, {600, 279}, {750, 351}}) do
+					for i = 1, 4 do
+						local signA = (i % 2 == 0) and 1 or -1
+						local signB = (i % 3 == 0) and -1 or 1
+						local a = make_big(pr[1], i * 311 + pr[1], signA)
+						local b = make_big(pr[2], i * 317 + pr[2], signB)
+						local q, r = core.divmod(a, b)
+						expect(S(core.add(core.mul(q, b), r))).to.equal(S(a))
+						expect_floor_remainder_range(r, b)
+						local qt, rt = core.tdivmod(a, b)
+						expect(S(core.add(core.mul(qt, b), rt))).to.equal(S(a))
+						expect_trunc_remainder_range(rt, a, b)
+					end
+				end
+			end)
+
 			it("large-limb sqrt corpus: Newton, Karatsuba, and core.sqrt agree exactly", function()
 				local one = bint.one()
 
