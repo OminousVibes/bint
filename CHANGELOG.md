@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-02-25
+
+### Added
+
+- `bint.to_sci(a)` returns a lossy scientific-notation decomposition `(coefficient, exponent)` where `1 ≤ |coefficient| < 10`. O(1), no allocation. Available as both a module function and an instance method.
+
+### Changed
+
+- **Breaking:** Conversion functions renamed to a consistent `to_*`/`from_*` convention:
+  - `tostring` → `to_string`
+  - `tonumber` → `to_number`
+  - `tole` → `to_le`
+  - `tobe` → `to_be`
+  - `fromle` → `from_le`
+  - `frombe` → `from_be`
+- `to_number`, `to_le`, and `to_be` are now available as instance methods (previously only `tostring` had an instance alias).
+- TypeScript declarations updated to reflect all renames and additions.
+
+### Fixed
+
+- Burnikel-Ziegler 3n/2n else-branch remainder formula used `A1` instead of `B1`, producing incorrect remainders for certain large divisions.
+- Burnikel-Ziegler 3n/2n if-branch quotient was not stripped before multiplication, causing spurious leading-zero limbs in the correction product.
+- Burnikel-Ziegler 2n/1n now handles short/equal-length inputs that the outer driver can produce when leading blocks are zero, instead of falling through into an invalid recursive split.
+- Burnikel-Ziegler outer driver block count now uses exact bit-length rather than limb-count ceiling, preventing off-by-one block splits on certain operand sizes.
+
 ## [0.2.2] - 2026-02-24
 
 ### Changed

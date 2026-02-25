@@ -4,9 +4,9 @@ Arbitrary-precision signed integer library for Luau.
 
 `bint` stores integers as little-endian base-`2^24` limbs, so values can grow without fixed-width overflow. It supports idiomatic operators (`+`, `-`, `*`, `//`, `%`, `^`, comparisons), plus a lower-level `core` API with mutating and non-mutating functions.
 
-`v0.2.2` is a maintenance/performance release focused on internal limb add/sub refactors and faster carry/borrow loops, with no public API changes.
+`v0.3.0` renames all conversion helpers to a uniform `to_*`/`from_*` convention, adds lossy scientific-notation decomposition (`to_sci`), and fixes several Burnikel-Ziegler division edge cases.
 
-Latest release: `0.2.2`.
+Latest release: `0.3.0`.
 
 ## Features
 
@@ -32,8 +32,8 @@ local sum = a + b
 local prod = a * b
 local q, r = core.divmod(a, b) -- floor division
 
-print(sum:tostring()) -- method form
-print(bint.tostring(prod)) -- function form
+print(sum:to_string()) -- method form
+print(bint.to_string(prod)) -- function form
 print(q, r)
 ```
 
@@ -55,12 +55,13 @@ For `roblox-ts` / TypeScript users, the standard non-mutating arithmetic/compari
 
 ### Conversion helpers
 
-- `bint.tostring(a: Bint, base?: number): string`
-- `bint.tonumber(a: Bint): number`
-- `bint.tole(a: Bint, trim?: boolean): string`
-- `bint.tobe(a: Bint, trim?: boolean): string`
-- `bint.fromle(s: string): Bint`
-- `bint.frombe(s: string): Bint`
+- `bint.to_string(a: Bint, base?: number): string`
+- `bint.to_number(a: Bint): number`
+- `bint.to_sci(a: Bint): (number, number)` — lossy scientific notation `(coefficient, exponent)`
+- `bint.to_le(a: Bint, trim?: boolean): string`
+- `bint.to_be(a: Bint, trim?: boolean): string`
+- `bint.from_le(s: string): Bint`
+- `bint.from_be(s: string): Bint`
 
 ### `core` operations
 
@@ -87,7 +88,7 @@ Supported metamethods:
 
 - `+`, `-`, `*`, `//`, `%`, `^`, unary `-`
 - `==`, `<`, `<=`
-- `tostring(x)` and `x:tostring()`
+- `tostring(x)` and `x:to_string()`
 - `#x` returns decimal digit count of magnitude
 
 `/` is intentionally unsupported and throws an error. Use `//` for integer division.
@@ -95,14 +96,15 @@ Supported metamethods:
 ## Semantics and caveats
 
 - `bint.from_int(n)` converts the already-represented Luau `number` exactly; Luau numbers are IEEE-754 doubles, so integer literals above `2^53` may already be rounded. Use `bint.from_string(...)` for exact large integer literals.
-- `bint.from_string` / `bint.tostring` support bases `2..36`.
+- `bint.from_string` / `bint.to_string` support bases `2..36`.
 - `core.divmod` and `//` use floor division semantics.
 - `core.tdivmod` uses truncated (toward zero) semantics.
 - `core.rshift(a, n)` uses arithmetic (sign-preserving) semantics, equivalent to `floor(a / 2^n)`.
 - `core.lshift_words` / `core.rshift_words` are limb-count shifts (base-`2^24` words), not bit shifts.
 - `core.sqrt(a)` returns `0` for `a <= 0`.
-- `bint.tole`/`bint.tobe` serialize magnitude only (sign is not encoded).
-- `bint.tonumber` is exact only up to magnitude `2^53`.
+- `bint.to_le`/`bint.to_be` serialize magnitude only (sign is not encoded).
+- `bint.to_number` is exact only up to magnitude `2^53`.
+- `bint.to_sci` is lossy by design; useful for display/formatting, not exact arithmetic.
 
 ## Running tests
 
