@@ -1722,6 +1722,24 @@ function bint.tonumber(a: Bint): number
 	return tonumber(bint.tostring(a)) :: number
 end
 
+--- Decompose a Bint into lossy scientific notation: coefficient × 10^exponent.
+--- O(1), no allocation. 1 ≤ |coefficient| < 10 (0 for zero).
+--- @param a The Bint to decompose.
+--- @return coefficient A lua number in (-10, -1] ∪ {0} ∪ [1, 10).
+--- @return exponent A non-negative integer.
+function bint.to_sci(a: Bint): (number, number)
+	if a.signum == 0 then return 0, 0 end
+	local limbs = a.limbs
+	local n = #limbs
+	local approx = limbs[n]
+	if n >= 2 then approx = approx * BASE + limbs[n - 1] end
+	if n >= 3 then approx = approx * BASE + limbs[n - 2] end
+	local log10_val = log10(approx) + (n - math.min(n, 3)) * RADIX_LEN_K
+	local exp = floor(log10_val)
+	local coeff = 10 ^ (log10_val - exp)
+	return a.signum * coeff, exp
+end
+
 --# METATABLE
 -- Thin wrappers over core; coerces both sides of each operator.
 

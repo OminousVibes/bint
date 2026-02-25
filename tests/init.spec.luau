@@ -1500,6 +1500,49 @@ return function(t)
 			end)
 		end)
 
+		--## to_sci
+		describe.tags(TAG_FAST, "to_sci", function()
+			it("zero returns (0, 0)", function()
+				local c, e = bint.to_sci(bint.zero())
+				expect(c).to.equal(0)
+				expect(e).to.equal(0)
+			end)
+
+			it("small exact value: 42 → coeff ≈ 4.2, exp = 1", function()
+				local c, e = bint.to_sci(bint("42"))
+				expect(e).to.equal(1)
+				expect(math.abs(c - 4.2) < 1e-12).to.equal(true)
+			end)
+
+			it("negative value carries sign on coefficient", function()
+				local c, e = bint.to_sci(bint("-12345"))
+				expect(e).to.equal(4)
+				expect(c < 0).to.equal(true)
+				expect(math.abs(c + 1.2345) < 1e-10).to.equal(true)
+			end)
+
+			it("large value: 2^1000", function()
+				local x = bint.one()
+				for _ = 1, 1000 do x = x * bint("2") end
+				local c, e = bint.to_sci(x)
+				-- 2^1000 has 302 digits, so exponent = 301
+				expect(e).to.equal(301)
+				expect(c >= 1 and c < 10).to.equal(true)
+			end)
+
+			it("very large: 2^196608 constructed from limbs", function()
+				-- 2^196608 = BASE^8192 since BASE = 2^24
+				-- That's limb[8193] = 1, all others zero.
+				local limbs = table.create(8193, 0)
+				limbs[8193] = 1
+				local x = bint.from_limbs(limbs, 1)
+				local c, e = bint.to_sci(x)
+				-- 2^196608 ≈ 8.04 × 10^59184
+				expect(e).to.equal(59184)
+				expect(c >= 1 and c < 10).to.equal(true)
+			end)
+		end)
+
 		--## Constructor edge cases
 		-- Covers from_limbs({}) / ({0}), non-decimal leading zeros, and factory freshness.
 		describe.tags(TAG_FAST, "constructor edge cases", function()
