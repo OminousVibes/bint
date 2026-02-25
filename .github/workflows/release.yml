@@ -82,30 +82,34 @@ jobs:
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "bundle_dir=bint-luau-$VERSION" >> "$GITHUB_OUTPUT"
-          echo "zip_name=bint-luau-$VERSION.zip" >> "$GITHUB_OUTPUT"
-          echo "tar_name=bint-luau-$VERSION.tar.gz" >> "$GITHUB_OUTPUT"
 
-      - name: Build Luau-only release bundle
+      - name: Extract changelog for this version
         shell: bash
         run: |
-          ROOT="dist/${{ steps.meta.outputs.bundle_dir }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          mkdir -p dist
+          # Grab everything between ## [VERSION] and the next ## [
+          awk -v ver="$VERSION" '
+            /^## \[/ { if (found) exit; if ($0 ~ "\\[" ver "\\]") found=1; next }
+            found { print }
+          ' CHANGELOG.md > dist/release-notes.md
 
-          mkdir -p "$ROOT/bint"
-          cp src/init.luau "$ROOT/bint/init.luau"
-          cp README.md LICENSE CHANGELOG.md "$ROOT/"
-          printf '%s\n' "${{ steps.meta.outputs.tag }}" > "$ROOT/VERSION.txt"
+      - name: Build Luau source zip
+        run: zip -r "dist/bint-${{ steps.meta.outputs.version }}.zip" src/ README.md LICENSE CHANGELOG.md -x "*.d.ts"
 
-          (cd dist && zip -r "${{ steps.meta.outputs.zip_name }}" "${{ steps.meta.outputs.bundle_dir }}")
-          tar -C dist -czf "dist/${{ steps.meta.outputs.tar_name }}" "${{ steps.meta.outputs.bundle_dir }}"
+      - name: Set up Rokit
+        uses: CompeyDev/setup-rokit@v0.1.2
+
+      - name: Build RBXM
+        run: rojo build -o "dist/bint-${{ steps.meta.outputs.version }}.rbxm"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: dist/release-notes.md
           files: |
-            dist/${{ steps.meta.outputs.zip_name }}
-            dist/${{ steps.meta.outputs.tar_name }}
-          generate_release_notes: true
+            dist/bint-${{ steps.meta.outputs.version }}.zip
+            dist/bint-${{ steps.meta.outputs.version }}.rbxm
           fail_on_unmatched_files: true
 
   publish-npm:

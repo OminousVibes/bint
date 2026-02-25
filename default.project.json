@@ -1,0 +1,10 @@
+{
+  "name": "bint",
+  "globIgnorePaths": [
+		"**/package.json",
+		"**/tsconfig.json"
+	],
+  "tree": {
+    "$path": "src"
+  }
+}
