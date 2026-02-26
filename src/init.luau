@@ -50,11 +50,14 @@ local BASE          = 2^24                  -- 16777216; limb*limb < 2^53 (safe 
 local BASE_MASK     = 0xFFFFFF              -- BASE - 1
 local BASE_POW      = 24
 local RADIX_CHUNK   = 1e8                   -- 10^8; for decimal I/O chunking
-local KARATSUBA_THR = 76                    -- switch to Karatsuba (limbs)
-local TOOM3_THR     = 117                   -- switch to Toom-3 (limbs)
+local MUL_SPLIT_THR = 33                    -- switch unsplit -> split schoolbook at this min-limb width
+local KARATSUBA_THR = 44                    -- switch to Karatsuba (limbs)
+local TOOM3_THR     = 66                    -- switch to Toom-3 (limbs)
 local SQRT_KAR_THR  = 4                     -- Karatsuba sqrt threshold (limbs)
 local BURNIKEL_THR  = 232                   -- switch to Burnikel-Ziegler (limbs)
 local BURNIKEL_OFF  = 40                    -- minimum BZ numerator-denominator offset
+
+assert(MUL_SPLIT_THR <= 33, "MUL_SPLIT_THR must be <= 33 for exactness with BASE=2^24")
 
 --# UPVALUE ALIASES
 
@@ -355,7 +358,7 @@ end
 -- Uses a Comba-style split-accumulator inner loop: each product a[j]*b[k] is split into
 -- its low limb (prod % BASE) and high limb (floor(prod / BASE)) before accumulation, keeping
 -- both running totals (c0, c1) well below 2^53 regardless of column weight.
-local function mul_limbs_basecase(a: {number}, b: {number}): {number}
+local function mul_limbs_schoolbook_split(a: {number}, b: {number}): {number}
 	local an, bn = #a, #b
 	local len = an + bn
 	local result = tcreate(len, 0)
@@ -375,6 +378,37 @@ local function mul_limbs_basecase(a: {number}, b: {number}): {number}
 		carry = c1
 	end
 	return result
+end
+
+-- Schoolbook O(n²) multiplication with a single (unsplit) column accumulator.
+-- Usually faster for small inputs because the inner loop avoids per-product mod/div, but only exact
+-- while the widest column stays below 2^53. With BASE=2^24 and IEEE-754 doubles, the worst-case
+-- column accumulator satisfies acc <= w*(BASE-1)^2 + carry <= w*(BASE^2-BASE), so w <= 32 is safe.
+local function mul_limbs_schoolbook_unsplit(a: {number}, b: {number}): {number}
+	local an, bn = #a, #b
+	local len = an + bn
+	local result = tcreate(len, 0)
+	local bnm1 = bn - 1
+	local carry = 0
+	for i = 1, len do
+		local acc = carry
+		local ip1 = i + 1
+		for j = mmax(i - bnm1, 1), mmin(i, an) do
+			acc += a[j] * b[ip1 - j]
+		end
+		result[i] = acc % BASE
+		carry = floor(acc / BASE)
+	end
+	return result
+end
+
+-- Schoolbook dispatcher: use the unsplit path below the split threshold (kept <= 33 for exactness).
+local function mul_limbs_schoolbook(a: {number}, b: {number}): {number}
+	local an, bn = #a, #b
+	if mmin(an, bn) < MUL_SPLIT_THR then
+		return mul_limbs_schoolbook_unsplit(a, b)
+	end
+	return mul_limbs_schoolbook_split(a, b)
 end
 
 -- Forward declarations needed for mutual recursion inside mul/div/sqrt.
@@ -467,8 +501,10 @@ end
 mul_limbs = function(a: {number}, b: {number}): {number}
 	local an, bn = #a, #b
 	local result: {number}
-	if an < KARATSUBA_THR or bn < KARATSUBA_THR then
-		result = mul_limbs_basecase(a, b)
+	if an < MUL_SPLIT_THR or bn < MUL_SPLIT_THR then
+		result = mul_limbs_schoolbook_unsplit(a, b)
+	elseif an < KARATSUBA_THR or bn < KARATSUBA_THR then
+		result = mul_limbs_schoolbook_split(a, b)
 	elseif an < TOOM3_THR or bn < TOOM3_THR then
 		result = mul_limbs_karatsuba(a, b)
 	else
@@ -1968,7 +2004,19 @@ local algorithms = {}
 
 --- Multiply using schoolbook O(n²) algorithm, regardless of operand size.
 function algorithms.mul_basecase(a: Bint, b: Bint): Bint
-	return mul_wrap(a, b, mul_limbs_basecase)
+	return mul_wrap(a, b, mul_limbs_schoolbook)
+end
+
+--- Multiply using the split-accumulator schoolbook O(n²) algorithm.
+--- This is the always-safe basecase implementation used as the fallback/reference path.
+function algorithms.mul_split(a: Bint, b: Bint): Bint
+	return mul_wrap(a, b, mul_limbs_schoolbook_split)
+end
+
+--- Multiply using the unsplit single-accumulator schoolbook O(n²) algorithm.
+--- Callers must ensure operand sizes stay within the exact-safe bound for BASE=2^24 (<= 32 limbs).
+function algorithms.mul_unsplit(a: Bint, b: Bint): Bint
+	return mul_wrap(a, b, mul_limbs_schoolbook_unsplit)
 end
 
 --- Multiply using Karatsuba O(n^1.585) algorithm at the top level, regardless of operand size.

@@ -819,6 +819,46 @@ return function(t)
 			--## Algorithm path coverage
 			-- Exercises basecase/Karatsuba/Toom-3 mul and Knuth/Burnikel-Ziegler div paths directly.
 			describe.tags(TAG_FAST, "algorithm path coverage", function()
+				it("mul schoolbook unsplit path matches split path at the exact-safe boundary", function()
+					local function all_max_limbs(len)
+						local limbs = table.create(len)
+						for i = 1, len do
+							limbs[i] = BASE - 1
+						end
+						return bint.from_limbs(limbs, 1)
+					end
+
+					for _, len in ipairs({31, 32}) do
+						local a = all_max_limbs(len)
+						local b = all_max_limbs(len)
+						local split = algorithms.mul_split(a, b)
+						local unsplit = algorithms.mul_unsplit(a, b)
+						local auto = algorithms.mul_basecase(a, b)
+						expect(S(unsplit)).to.equal(S(split))
+						expect(S(auto)).to.equal(S(split))
+					end
+
+					-- 33x33 exceeds the unsplit exactness proof bound; the auto basecase must use split.
+					do
+						local a = all_max_limbs(33)
+						local b = all_max_limbs(33)
+						local split = algorithms.mul_split(a, b)
+						local auto = algorithms.mul_basecase(a, b)
+						expect(S(auto)).to.equal(S(split))
+					end
+
+					-- Guard is based on the widest column (min operand size), so 33x32 is still safe.
+					do
+						local a = all_max_limbs(33)
+						local b = all_max_limbs(32)
+						local split = algorithms.mul_split(a, b)
+						local unsplit = algorithms.mul_unsplit(a, b)
+						local auto = algorithms.mul_basecase(a, b)
+						expect(S(unsplit)).to.equal(S(split))
+						expect(S(auto)).to.equal(S(split))
+					end
+				end)
+
 				it("division path: knuth-sized operands should satisfy floor/trunc invariants", function()
 					local a = make_big(300, 97, -1)
 					local b = make_big(300, 131, 1)
