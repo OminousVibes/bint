@@ -440,7 +440,7 @@ local function mul_limbs_toom3(x: {number}, y: {number}): {number}
 	-- interpolation (all divisions here are single-limb, i.e. linear)
 	-- step 1: v2 = (v2 - vm1) / 3
 	if vm1_neg then
-		v2 = add_limbs(v2, vm1)
+		v2 = add_limbs_mut(v2, vm1)
 	else
 		sub_limbs_mut(v2, vm1)
 	end
@@ -724,7 +724,7 @@ local function sqrt_newton(n: {number}): {number}
 
 	while true do
 		local q, _ = div_limbs(n, prev1)
-		local x1, _ = div_by_int(add_limbs(prev1, q), 2, true)
+		local x1, _ = div_by_int(add_limbs_mut(q, prev1), 2, true)
 
 		if eq_abs(x1, prev1) then
 			return x1
