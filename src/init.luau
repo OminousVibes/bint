@@ -763,10 +763,17 @@ local function sqrt_karatsuba(n: {number}): ({number}, {number})
 	local r2 = add_limbs_mut(lshift_limbs(u, m), a0)
 
 	-- q can overshoot by more than 1; keep correcting until r2 - qSq is non-negative.
-	while lt_abs(r2, qSq) do
-		r2 = add_limbs_mut(r2, add_limbs(s, s))
-		sub_limbs_mut(r2, {1})
-		s = sub_limbs_mut(s, {1})
+	-- Lazy: only allocate ds1 = 2s-1 if correction is actually needed (~50% of inputs).
+	if lt_abs(r2, qSq) then
+		local one = {1}
+		local two = {2}
+		local cor = add_limbs(s, s)
+		sub_limbs_mut(cor, one)        -- cor = 2s - 1
+		repeat
+			add_limbs_mut(r2, cor)     -- r2 += 2s - 1  (fused add + subtract)
+			sub_limbs_mut(s, one)      -- s -= 1
+			sub_limbs_mut(cor, two)    -- cor = 2*(s_new) - 1
+		until not lt_abs(r2, qSq)
 	end
 	r2 = sub_limbs_mut(r2, qSq)
 
