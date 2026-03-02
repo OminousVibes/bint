@@ -52,10 +52,10 @@ local BASE_POW      = 24
 local RADIX_CHUNK   = 1e8                   -- 10^8; for decimal I/O chunking
 local MUL_SPLIT_THR = 33                    -- switch unsplit -> split schoolbook at this min-limb width
 local KARATSUBA_THR = 44                    -- switch to Karatsuba (limbs)
-local TOOM3_THR     = 66                    -- switch to Toom-3 (limbs)
+local TOOM3_THR     = 145                   -- switch to Toom-3 (limbs)
 local SQRT_KAR_THR  = 4                     -- Karatsuba sqrt threshold (limbs)
-local BURNIKEL_THR  = 232                   -- switch to Burnikel-Ziegler (limbs)
-local BURNIKEL_OFF  = 40                    -- minimum BZ numerator-denominator offset
+local BURNIKEL_THR  = 98                   -- switch to Burnikel-Ziegler (limbs)
+local BURNIKEL_OFF  = 59                    -- minimum BZ numerator-denominator offset
 
 assert(MUL_SPLIT_THR <= 33, "MUL_SPLIT_THR must be <= 33 for exactness with BASE=2^24")
 
