@@ -148,23 +148,6 @@ local function div_by_int_exact(limbs: {number}, d: number, in_place: boolean?, 
 	return q
 end
 
--- Mutable exact power-of-ten cursor used to correct __len estimates.
--- This keeps __len exact without paying decimal conversion cost on every call.
-local pow10_cursor_exp = 0
-local pow10_cursor_limbs = {1} :: {number} -- 10^0
-
-local function seek_pow10_limbs(exp: number): {number}
-	while pow10_cursor_exp < exp do
-		pow10_cursor_limbs = mul_by_int(pow10_cursor_limbs, 10)
-		pow10_cursor_exp += 1
-	end
-	while pow10_cursor_exp > exp do
-		pow10_cursor_limbs = div_by_int_exact(pow10_cursor_limbs, 10, true, "internal error: pow10 cursor division left a remainder")
-		pow10_cursor_exp -= 1
-	end
-	return pow10_cursor_limbs
-end
-
 -- Word-aligned left shift: prepend n zero limbs.
 local function lshift_limbs(limbs: {number}, n: number): {number}
 	return tmove(limbs, 1, #limbs, n + 1, tcreate(n, 0))
@@ -403,7 +386,7 @@ local function mul_limbs_schoolbook_unsplit(a: {number}, b: {number}): {number}
 end
 
 -- Schoolbook dispatcher: use the unsplit path below the split threshold (kept <= 33 for exactness).
-local function mul_limbs_schoolbook(a: {number}, b: {number}): {number}
+local function mul_limbs_schoolbook_dispatch(a: {number}, b: {number}): {number}
 	local an, bn = #a, #b
 	if mmin(an, bn) < MUL_SPLIT_THR then
 		return mul_limbs_schoolbook_unsplit(a, b)
@@ -517,7 +500,7 @@ end
 --## Division (Knuth + Burnikel-Ziegler)
 
 -- Knuth Algorithm D (multi-precision long division).
-local function div_knuths(U: {number}, V: {number}): ({number}, {number})
+local function div_limbs_knuth(U: {number}, V: {number}): ({number}, {number})
 	local n = #V
 	local m = #U - n
 
@@ -658,13 +641,13 @@ div_bz_2n1n = function(A: {number}, B: {number}): ({number}, {number})
 		elseif cmp == 0 then
 			return {1}, {}
 		end
-		local q, r = div_knuths(A, B)
+		local q, r = div_limbs_knuth(A, B)
 		strip_zeros(q)
 		return q, r
 	end
 
 	if bLen % 2 == 1 or bLen < BURNIKEL_THR then
-		return div_knuths(A, B)
+		return div_limbs_knuth(A, B)
 	end
 
 	local k = bLen // 2
@@ -682,7 +665,7 @@ div_bz_2n1n = function(A: {number}, B: {number}): ({number}, {number})
 end
 
 -- Outer Burnikel-Ziegler driver.
-local function div_burnikel(A: {number}, B: {number}): ({number}, {number})
+local function div_limbs_burnikel(A: {number}, B: {number}): ({number}, {number})
 	local s = #B
 
 	local m = 2 ^ floor(mlog(s / BURNIKEL_THR, 2) + 1)
@@ -740,9 +723,9 @@ div_limbs = function(a: {number}, b: {number}): ({number}, {number})
 	local diff = #a - #b
 	local q, r: {number}
 	if #a > BURNIKEL_THR and #b > BURNIKEL_THR and diff > BURNIKEL_OFF then
-		q, r = div_burnikel(a, b)
+		q, r = div_limbs_burnikel(a, b)
 	else
-		q, r = div_knuths(a, b)
+		q, r = div_limbs_knuth(a, b)
 	end
 	strip_zeros(q)
 	return q, r
@@ -751,7 +734,7 @@ end
 --## Square Root (Newton-Heron + Karatsuba)
 
 -- Newton-Heron iteration.
-local function sqrt_newton(n: {number}): {number}
+local function sqrt_limbs_newton(n: {number}): {number}
 	local prev2: {number} = {1}
 	-- Keep the seed as a valid dense 1-based limb array even for 1-limb inputs.
 	local guessLen = mmax(#n // 2, 1)
@@ -773,10 +756,10 @@ local function sqrt_newton(n: {number}): {number}
 end
 
 -- Karatsuba square root; returns (s, r) where s² + r = n.
-local function sqrt_karatsuba(n: {number}): ({number}, {number})
+local function sqrt_limbs_karatsuba(n: {number}): ({number}, {number})
 	local limbLen = #n
 	if limbLen < SQRT_KAR_THR then
-		local sq = sqrt_newton(n)
+		local sq = sqrt_limbs_newton(n)
 		return sq, sub_limbs(n, mul_limbs(sq, sq))
 	end
 
@@ -787,7 +770,7 @@ local function sqrt_karatsuba(n: {number}): ({number}, {number})
 	local a1   = get_slice(n, m + 1, m2)
 	local a0   = get_slice(n, 1, m)
 
-	local s1, r1 = sqrt_karatsuba(a3a2)
+	local s1, r1 = sqrt_limbs_karatsuba(a3a2)
 
 	local r1b = add_limbs_mut(lshift_limbs(r1, m), a1)
 	local ds1 = add_limbs(s1, s1)
@@ -819,10 +802,10 @@ end
 -- Dispatch sqrt; returns the root only.
 local function sqrt_limbs(n: {number}): {number}
 	if #n >= SQRT_KAR_THR then
-		local s, _ = sqrt_karatsuba(n)
+		local s, _ = sqrt_limbs_karatsuba(n)
 		return s
 	end
-	return sqrt_newton(n)
+	return sqrt_limbs_newton(n)
 end
 
 --## Power
@@ -927,11 +910,7 @@ local function from_string_dec(str: string, negative: boolean): Bint
 			carry = val % BASE
 		end
 		tinsert(out, carry)
-		while true do
-			local len = #chunks
-			if len == 0 or chunks[len] ~= 0 then break end
-			chunks[len] = nil
-		end
+		strip_zeros(chunks)
 	end
 
 	return from_raw(out, negative and -1 or 1)
@@ -1177,6 +1156,40 @@ local function add_signed(al: {number}, as: number, bl: {number}, bs: number): (
 	end
 end
 
+-- Signed in-place addition primitive for Bint-backed state.
+-- sub_mut(a, b) is equivalent to add_signed_mut(a, b.limbs, -b.signum).
+local function add_signed_mut(a: Bint, bl: {number}, bs: number): Bint
+	local as = a.signum
+	if bs == 0 then return a end
+	if as == 0 then
+		a.limbs = tclone(bl)
+		a.signum = bs
+		return a
+	end
+	if as == bs then
+		a.limbs = add_limbs_mut(a.limbs, bl)
+		return a
+	end
+
+	local cmp = cmp_abs(a.limbs, bl)
+	if cmp == 0 then
+		a.limbs = {}
+		a.signum = 0
+		return a
+	end
+	if cmp > 0 then
+		sub_limbs_mut(a.limbs, bl)
+		if #a.limbs == 0 then
+			a.signum = 0
+		end
+		return a
+	end
+
+	a.limbs = sub_limbs(bl, a.limbs)
+	a.signum = bs
+	return a
+end
+
 --- Add two Bints.
 --- @param a Left operand.
 --- @param b Right operand.
@@ -1201,28 +1214,7 @@ end
 --- @param b The value to add.
 --- @return a after addition.
 function core.add_mut(a: Bint, b: Bint): Bint
-	local as, bs = a.signum, b.signum
-	if bs == 0 then return a end
-	if as == 0 then
-		a.limbs = tclone(b.limbs); a.signum = bs
-		return a
-	end
-	if as == bs then
-		a.limbs = add_limbs_mut(a.limbs, b.limbs)  -- extends a.limbs in-place, no new array
-		return a
-	end
-	local cmp = cmp_abs(a.limbs, b.limbs)
-	if cmp == 0 then
-		a.limbs = {}; a.signum = 0; return a
-	end
-	if cmp > 0 then
-		sub_limbs_mut(a.limbs, b.limbs)  -- shrinks a.limbs in-place, no new array
-		if #a.limbs == 0 then a.signum = 0 end
-		return a
-	end
-	-- |a| < |b|: result comes from b's side; must allocate
-	a.limbs = sub_limbs(b.limbs, a.limbs); a.signum = bs
-	return a
+	return add_signed_mut(a, b.limbs, b.signum)
 end
 
 --- Subtract b from a in-place.
@@ -1230,28 +1222,7 @@ end
 --- @param b The value to subtract.
 --- @return a after subtraction.
 function core.sub_mut(a: Bint, b: Bint): Bint
-	local as = a.signum
-	local bs = -b.signum  -- treat b as negated; b is not touched
-	if bs == 0 then return a end
-	if as == 0 then
-		a.limbs = tclone(b.limbs); a.signum = bs
-		return a
-	end
-	if as == bs then
-		a.limbs = add_limbs_mut(a.limbs, b.limbs)
-		return a
-	end
-	local cmp = cmp_abs(a.limbs, b.limbs)
-	if cmp == 0 then
-		a.limbs = {}; a.signum = 0; return a
-	end
-	if cmp > 0 then
-		sub_limbs_mut(a.limbs, b.limbs)
-		if #a.limbs == 0 then a.signum = 0 end
-		return a
-	end
-	a.limbs = sub_limbs(b.limbs, a.limbs); a.signum = bs
-	return a
+	return add_signed_mut(a, b.limbs, -b.signum)
 end
 
 --## Multiplication
@@ -1296,21 +1267,77 @@ end
 -- Adjust a truncated remainder to a floor remainder.
 local function correct_remainder(self_sign: number, div_sign: number, r: Bint, divisor: Bint): Bint
 	if r.signum == 0 then return r end
-	local same = self_sign == div_sign
-	if same and div_sign == -1 then
-		r.signum = -1
-		return r
-	elseif self_sign == 1 and div_sign == -1 then
-		-- r = divisor + r
-		local l, s = add_signed(divisor.limbs, divisor.signum, r.limbs, r.signum)
-		r.limbs = l; r.signum = s
-		return r
-	elseif not same then  -- self=-1, div=+1, r_floor = r_trunc + divisor
-		local l, s = add_signed(divisor.limbs, divisor.signum, r.limbs, r.signum)
-		r.limbs = l; r.signum = s
+	if self_sign == div_sign then
+		if div_sign == -1 then
+			r.signum = -1
+		end
 		return r
 	end
+
+	local l, s = add_signed(divisor.limbs, divisor.signum, r.limbs, r.signum)
+	r.limbs = l
+	r.signum = s
 	return r
+end
+
+-- Unsigned division driver used by floor/trunc wrappers and algorithm entrypoints.
+local function unsigned_divmod(
+	U: {number},
+	V: {number},
+	raw_div: ((({number}, {number}) -> ({number}, {number}))?)
+): ({number}, {number})
+	if #V == 1 then
+		return div_by_int(U, V[1])
+	end
+	if raw_div ~= nil then
+		return raw_div(U, V)
+	end
+	return div_limbs(U, V)
+end
+
+-- Shared Bint-level division preamble for floor and trunc division.
+local function divmod_mode(
+	a: Bint,
+	b: Bint,
+	floor_mode: boolean,
+	raw_div: ((({number}, {number}) -> ({number}, {number}))?)
+): (Bint, Bint)
+	local as, bs = a.signum, b.signum
+	if bs == 0 then
+		error("bint: division by zero", 2)
+	end
+	if as == 0 then
+		return make_zero(), make_zero()
+	end
+
+	local U, V = a.limbs, b.limbs
+	local cmp = cmp_abs(U, V)
+	if cmp == -1 then
+		if floor_mode and as ~= bs then
+			local rl, rs = add_signed(b.limbs, b.signum, a.limbs, a.signum)
+			return from_raw({1}, -1), from_raw(rl, rs)
+		end
+		return make_zero(), clone_bint(a)
+	elseif cmp == 0 then
+		if floor_mode then
+			return from_raw({1}, floor(as / bs)), make_zero()
+		end
+		return from_raw({1}, as * bs > 0 and 1 or -1), make_zero()
+	end
+
+	local q_limbs, r_limbs = unsigned_divmod(U, V, raw_div)
+	local q_sign = as * bs > 0 and 1 or -1
+	local q = from_raw(q_limbs, q_sign)
+	local r = from_raw(r_limbs, as)
+	if floor_mode then
+		r = correct_remainder(as, bs, r, b)
+		if as ~= bs and r.signum ~= 0 then
+			q.limbs = add_limbs_mut(q.limbs, {1})
+			strip_zeros(q.limbs)
+		end
+		q.signum = q_sign
+	end
+	return q, r
 end
 
 --## Floor Div
@@ -1321,52 +1348,7 @@ end
 --- @return The quotient and remainder as new Bints.
 --- @raise An error on division by zero.
 function core.divmod(a: Bint, b: Bint): (Bint, Bint)
-	local as, bs = a.signum, b.signum
-	if bs == 0 then
-		error("bint: division by zero", 2)
-	end
-
-	if as == 0 then return make_zero(), make_zero() end
-
-	local U, V = a.limbs, b.limbs
-	local cmp = cmp_abs(U, V)
-
-	if cmp == -1 then
-		-- |a| < |b|: quotient is 0 or ±1 with floor correction
-		-- both mixed-sign cases reduce to remainder = b + a
-		if as == 1 and bs == -1 or as == -1 and bs == 1 then
-			local rl, rs = add_signed(b.limbs, b.signum, a.limbs, a.signum)
-			return from_raw({1}, -1), from_raw(rl, rs)
-		end
-		-- same sign: quotient=0, remainder=a
-		return make_zero(), clone_bint(a)
-	elseif cmp == 0 then
-		-- |a| == |b|
-		local q = from_raw({1}, floor(as / bs))
-		return q, make_zero()
-	end
-
-	-- general case: |a| > |b|
-	local q_limbs, r_limbs: {number}
-	if #V == 1 then
-		q_limbs, r_limbs = div_by_int(U, V[1])
-	else
-		q_limbs, r_limbs = div_limbs(U, V)
-	end
-
-	local q = from_raw(q_limbs, as * bs > 0 and 1 or -1)
-	local r = from_raw(r_limbs, as)  -- initial sign of remainder = sign of dividend
-
-	-- floor correction
-	r = correct_remainder(as, bs, r, b)
-	if as ~= bs and r.signum ~= 0 then
-		-- floor: push quotient one further toward −∞
-		q.limbs = add_limbs_mut(q.limbs, {1})
-		strip_zeros(q.limbs)
-	end
-	q.signum = as * bs > 0 and 1 or -1
-
-	return q, r
+	return divmod_mode(a, b, true, nil)
 end
 
 --- Compute the floor-division quotient.
@@ -1414,32 +1396,7 @@ end
 --- @return The quotient and remainder as new Bints.
 --- @raise An error on division by zero.
 function core.tdivmod(a: Bint, b: Bint): (Bint, Bint)
-	local as, bs = a.signum, b.signum
-	if bs == 0 then
-		error("bint: division by zero", 2)
-	end
-
-	if as == 0 then return make_zero(), make_zero() end
-
-	local U, V = a.limbs, b.limbs
-	local cmp = cmp_abs(U, V)
-
-	if cmp == -1 then
-		return make_zero(), clone_bint(a)
-	elseif cmp == 0 then
-		return from_raw({1}, as * bs > 0 and 1 or -1), make_zero()
-	end
-
-	local q_limbs, r_limbs: {number}
-	if #V == 1 then
-		q_limbs, r_limbs = div_by_int(U, V[1])
-	else
-		q_limbs, r_limbs = div_limbs(U, V)
-	end
-
-	-- truncated: quotient sign = sign(a)*sign(b), remainder sign = sign(a)
-	local q_sign = as * bs > 0 and 1 or -1
-	return from_raw(q_limbs, q_sign), from_raw(r_limbs, as)
+	return divmod_mode(a, b, false, nil)
 end
 
 --- Raise a to the power b.
@@ -1644,12 +1601,8 @@ function bint.to_string(a: Bint, base: number?): string
 			end
 			chunks[idx] = sformat("%08d", carry)
 			idx -= 1
-			while true do
-				local n = #clone
-				if n == 0 or clone[n] ~= 0 then break end
-				clone[n] = nil
+				strip_zeros(clone)
 			end
-		end
 		-- remove leading zeros from the first chunk
 		local str = tconcat(chunks):gsub("^0+", "")
 		return prefix .. str
@@ -1704,7 +1657,7 @@ function bint.to_be(a: Bint, trim: boolean?): string
 end
 
 -- Shared implementation for from_le/from_be (caller reverses if needed).
-local function fromle_bytes(s: string): Bint
+local function from_le_bytes(s: string): Bint
 	local n = slen(s)
 	local limbs: {number} = {}
 	for i = 1, n, 3 do
@@ -1727,7 +1680,7 @@ function bint.from_le(s: string): Bint
 	if type(s) ~= "string" then
 		error("bint.from_le: expected string", 2)
 	end
-	return fromle_bytes(s)
+	return from_le_bytes(s)
 end
 
 --- Create a new Bint from a big-endian byte string.
@@ -1739,7 +1692,7 @@ function bint.from_be(s: string): Bint
 	if type(s) ~= "string" then
 		error("bint.from_be: expected string", 2)
 	end
-	return fromle_bytes(sreverse(s))
+	return from_le_bytes(sreverse(s))
 end
 
 --- Convert a Bint to a lua number.
@@ -1877,6 +1830,23 @@ Bint.__tostring = function(a: Bint): string
 	return bint.to_string(a)
 end
 
+-- Mutable exact power-of-ten cursor used to correct __len estimates.
+-- This keeps __len exact without paying decimal conversion cost on every call.
+local pow10_cursor_exp = 0
+local pow10_cursor_limbs = {1} :: {number} -- 10^0
+
+local function seek_pow10_limbs(exp: number): {number}
+	while pow10_cursor_exp < exp do
+		pow10_cursor_limbs = mul_by_int(pow10_cursor_limbs, 10)
+		pow10_cursor_exp += 1
+	end
+	while pow10_cursor_exp > exp do
+		pow10_cursor_limbs = div_by_int_exact(pow10_cursor_limbs, 10, true, "internal error: pow10 cursor division left a remainder")
+		pow10_cursor_exp -= 1
+	end
+	return pow10_cursor_limbs
+end
+
 --- Return the number of decimal digits (metamethod for #).
 --- @param a The Bint.
 --- @return The number of decimal digits, or 0 for zero.
@@ -1962,39 +1932,8 @@ Bint.to_be			= bint.to_be
 -- top-level algorithm entry path. Recursive subproblems may still dispatch/fallback
 -- internally based on thresholds (see per-wrapper notes).
 
--- Shared floor-division preamble used by div_knuth and div_burnikel.
--- Mirrors core.divmod exactly; raw_div replaces the div_limbs dispatch call.
-local function divmod_with(a: Bint, b: Bint, raw_div: ({number}, {number}) -> ({number}, {number})): (Bint, Bint)
-	local as, bs = a.signum, b.signum
-	if bs == 0 then
-		error("bint: division by zero", 2)
-	end
-	if as == 0 then return make_zero(), make_zero() end
-	local U, V = a.limbs, b.limbs
-	local cmp = cmp_abs(U, V)
-	if cmp == -1 then
-		if as == 1 and bs == -1 or as == -1 and bs == 1 then
-			local rl, rs = add_signed(b.limbs, b.signum, a.limbs, a.signum)
-			return from_raw({1}, -1), from_raw(rl, rs)
-		end
-		return make_zero(), clone_bint(a)
-	elseif cmp == 0 then
-		return from_raw({1}, floor(as / bs)), make_zero()
-	end
-	local q_limbs, r_limbs = raw_div(U, V)
-	local q = from_raw(q_limbs, as * bs > 0 and 1 or -1)
-	local r = from_raw(r_limbs, as)
-	r = correct_remainder(as, bs, r, b)
-	if as ~= bs and r.signum ~= 0 then
-		q.limbs = add_limbs_mut(q.limbs, {1})
-		strip_zeros(q.limbs)
-	end
-	q.signum = as * bs > 0 and 1 or -1
-	return q, r
-end
-
 -- Shared sign wrapper for multiplication algorithms.
-local function mul_wrap(a: Bint, b: Bint, limb_fn: ({number}, {number}) -> {number}): Bint
+local function wrap_mul_algorithm(a: Bint, b: Bint, limb_fn: ({number}, {number}) -> {number}): Bint
 	local as, bs = a.signum, b.signum
 	if as == 0 or bs == 0 then return make_zero() end
 	return from_raw(limb_fn(a.limbs, b.limbs), as * bs > 0 and 1 or -1)
@@ -2004,55 +1943,55 @@ local algorithms = {}
 
 --- Multiply using schoolbook O(n²) algorithm, regardless of operand size.
 function algorithms.mul_basecase(a: Bint, b: Bint): Bint
-	return mul_wrap(a, b, mul_limbs_schoolbook)
+	return wrap_mul_algorithm(a, b, mul_limbs_schoolbook_dispatch)
 end
 
 --- Multiply using the split-accumulator schoolbook O(n²) algorithm.
 --- This is the always-safe basecase implementation used as the fallback/reference path.
 function algorithms.mul_split(a: Bint, b: Bint): Bint
-	return mul_wrap(a, b, mul_limbs_schoolbook_split)
+	return wrap_mul_algorithm(a, b, mul_limbs_schoolbook_split)
 end
 
 --- Multiply using the unsplit single-accumulator schoolbook O(n²) algorithm.
 --- Callers must ensure operand sizes stay within the exact-safe bound for BASE=2^24 (<= 32 limbs).
 function algorithms.mul_unsplit(a: Bint, b: Bint): Bint
-	return mul_wrap(a, b, mul_limbs_schoolbook_unsplit)
+	return wrap_mul_algorithm(a, b, mul_limbs_schoolbook_unsplit)
 end
 
 --- Multiply using Karatsuba O(n^1.585) algorithm at the top level, regardless of operand size.
 --- Recursive sub-problems are dispatched through mul_limbs and may use basecase internally.
 function algorithms.mul_karatsuba(a: Bint, b: Bint): Bint
-	return mul_wrap(a, b, mul_limbs_karatsuba)
+	return wrap_mul_algorithm(a, b, mul_limbs_karatsuba)
 end
 
 --- Multiply using Toom-Cook 3-way O(n^1.465) algorithm at the top level, regardless of operand size.
 --- Recursive sub-problems are dispatched through mul_limbs and may use basecase or Karatsuba internally.
 function algorithms.mul_toom3(a: Bint, b: Bint): Bint
-	return mul_wrap(a, b, mul_limbs_toom3)
+	return wrap_mul_algorithm(a, b, mul_limbs_toom3)
 end
 
 --- Floor-divide using Knuth Algorithm D, regardless of operand size.
 function algorithms.div_knuth(a: Bint, b: Bint): (Bint, Bint)
-	return divmod_with(a, b, div_knuths)
+	return divmod_mode(a, b, true, div_limbs_knuth)
 end
 
 --- Floor-divide using the Burnikel-Ziegler outer driver, regardless of operand size.
---- Note: div_burnikel falls back to Knuth when the divisor is below BURNIKEL_THR limbs.
+--- Note: div_limbs_burnikel falls back to Knuth when the divisor is below BURNIKEL_THR limbs.
 function algorithms.div_burnikel(a: Bint, b: Bint): (Bint, Bint)
-	return divmod_with(a, b, div_burnikel)
+	return divmod_mode(a, b, true, div_limbs_burnikel)
 end
 
 --- Compute the integer square root using Newton-Heron iteration, regardless of operand size.
 function algorithms.sqrt_newton(a: Bint): Bint
 	if a.signum ~= 1 then return make_zero() end
-	return from_raw(sqrt_newton(a.limbs), 1)
+	return from_raw(sqrt_limbs_newton(a.limbs), 1)
 end
 
 --- Compute the integer square root using the Karatsuba-recursive algorithm, regardless of size.
---- Note: sqrt_karatsuba falls back to Newton for inputs below SQRT_KAR_THR limbs.
+--- Note: sqrt_limbs_karatsuba falls back to Newton for inputs below SQRT_KAR_THR limbs.
 function algorithms.sqrt_karatsuba(a: Bint): Bint
 	if a.signum ~= 1 then return make_zero() end
-	local s, _ = sqrt_karatsuba(a.limbs)
+	local s, _ = sqrt_limbs_karatsuba(a.limbs)
 	return from_raw(s, 1)
 end
 
