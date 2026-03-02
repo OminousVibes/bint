@@ -26,7 +26,7 @@ Create a Bint with one of the constructor functions:
 
 * `bint.from_int(n)`       — from a Lua number
 * `bint.from_string(s, b)` — from a string in any base 2–36
-* `bint.from_limbs(t)`     — from a raw limb table
+* `bint.from_limbs(t, s?)` — from raw limbs, optional signum
 * `bint.zero()` / `bint.one()`
 * `bint.new(v)`            — from any BintArg; clones existing Bints
 * `bint(v)`                — alias for `bint.new`
@@ -150,19 +150,19 @@ end
 
 -- Mutable exact power-of-ten cursor used to correct __len estimates.
 -- This keeps __len exact without paying decimal conversion cost on every call.
-local POW10_CURSOR_EXP = 0
-local POW10_CURSOR_LIMBS = {1} :: {number} -- 10^0
+local pow10_cursor_exp = 0
+local pow10_cursor_limbs = {1} :: {number} -- 10^0
 
 local function seek_pow10_limbs(exp: number): {number}
-	while POW10_CURSOR_EXP < exp do
-		POW10_CURSOR_LIMBS = mul_by_int(POW10_CURSOR_LIMBS, 10)
-		POW10_CURSOR_EXP += 1
+	while pow10_cursor_exp < exp do
+		pow10_cursor_limbs = mul_by_int(pow10_cursor_limbs, 10)
+		pow10_cursor_exp += 1
 	end
-	while POW10_CURSOR_EXP > exp do
-		POW10_CURSOR_LIMBS = div_by_int_exact(POW10_CURSOR_LIMBS, 10, true, "internal error: pow10 cursor division left a remainder")
-		POW10_CURSOR_EXP -= 1
+	while pow10_cursor_exp > exp do
+		pow10_cursor_limbs = div_by_int_exact(pow10_cursor_limbs, 10, true, "internal error: pow10 cursor division left a remainder")
+		pow10_cursor_exp -= 1
 	end
-	return POW10_CURSOR_LIMBS
+	return pow10_cursor_limbs
 end
 
 -- Word-aligned left shift: prepend n zero limbs.
