@@ -2,11 +2,14 @@
 --!nolint IntegerParsing
 
 return function(t)
-	local describe, it, expect = t.describe, t.it, t.expect
+	local describe, it, expect, beforeEach = t.describe, t.it, t.expect, t.beforeEach
 	local mod = require("../src")
 	local bint = mod.bint
 	local core = mod.core
-	local algorithms = mod.algorithms
+	local internals = mod.internals
+	local tuning = mod.tuning
+	local algorithms = internals.algorithms
+	local helpers = internals.helpers
 	local BASE = 2 ^ 24
 	local TAG_FAST = {"fast", "full", "stress"}
 	local TAG_FULL = {"full", "stress"}
@@ -176,7 +179,21 @@ return function(t)
 		return bint.from_limbs(out, sign)
 	end
 
+	local function canonical_limbs(limbs)
+		local out = table.clone(limbs)
+		helpers.strip_zeros(out)
+		return out
+	end
+
+	local function expect_limbs_equal(actual, expected)
+		expect(canonical_limbs(actual)).to.equal(canonical_limbs(expected))
+	end
+
 	describe("bint comprehensive", function()
+		beforeEach(function()
+			tuning.reset_thresholds()
+		end)
+
 		--## Constructors and validation
 		describe.tags(TAG_FAST, "constructors and validation", function()
 			it("from_int should handle regular signed values", function()
@@ -831,9 +848,9 @@ return function(t)
 					for _, len in ipairs({31, 32}) do
 						local a = all_max_limbs(len)
 						local b = all_max_limbs(len)
-						local split = algorithms.mul_split(a, b)
-						local unsplit = algorithms.mul_unsplit(a, b)
-						local auto = algorithms.mul_basecase(a, b)
+						local split = algorithms.mul_schoolbook_split(a, b)
+						local unsplit = algorithms.mul_schoolbook_unsplit(a, b)
+						local auto = algorithms.mul_schoolbook(a, b)
 						expect(S(unsplit)).to.equal(S(split))
 						expect(S(auto)).to.equal(S(split))
 					end
@@ -842,8 +859,8 @@ return function(t)
 					do
 						local a = all_max_limbs(33)
 						local b = all_max_limbs(33)
-						local split = algorithms.mul_split(a, b)
-						local auto = algorithms.mul_basecase(a, b)
+						local split = algorithms.mul_schoolbook_split(a, b)
+						local auto = algorithms.mul_schoolbook(a, b)
 						expect(S(auto)).to.equal(S(split))
 					end
 
@@ -851,9 +868,9 @@ return function(t)
 					do
 						local a = all_max_limbs(33)
 						local b = all_max_limbs(32)
-						local split = algorithms.mul_split(a, b)
-						local unsplit = algorithms.mul_unsplit(a, b)
-						local auto = algorithms.mul_basecase(a, b)
+						local split = algorithms.mul_schoolbook_split(a, b)
+						local unsplit = algorithms.mul_schoolbook_unsplit(a, b)
+						local auto = algorithms.mul_schoolbook(a, b)
 						expect(S(unsplit)).to.equal(S(split))
 						expect(S(auto)).to.equal(S(split))
 					end
@@ -938,6 +955,422 @@ return function(t)
 				local one = bint.one()
 				expect(core.le(s * s, n)).to.equal(true)
 				expect(core.lt(n, (s + one) * (s + one))).to.equal(true)
+			end)
+		end)
+
+		describe.tags(TAG_FAST, "internals: tuning", function()
+			it("get_thresholds exposes the same config shape and reset_thresholds restores defaults", function()
+				local defaults = tuning.get_thresholds()
+				expect(defaults.mul_split_thr).to.equal(33)
+				expect(defaults.karatsuba_thr).to.equal(44)
+				expect(defaults.toom3_thr).to.equal(145)
+				expect(defaults.sqrt_kar_thr).to.equal(4)
+				expect(defaults.burnikel_dispatch_thr).to.equal(98)
+				expect(defaults.burnikel_leaf_thr).to.equal(98)
+				expect(defaults.burnikel_off).to.equal(59)
+
+				tuning.set_thresholds({
+					mul_split_thr = 10,
+					karatsuba_thr = 60,
+					toom3_thr = 160,
+					sqrt_kar_thr = 6,
+					burnikel_dispatch_thr = 80,
+					burnikel_leaf_thr = 64,
+					burnikel_off = 12,
+				})
+
+				local updated = tuning.get_thresholds()
+				expect(updated.mul_split_thr).to.equal(10)
+				expect(updated.karatsuba_thr).to.equal(60)
+				expect(updated.toom3_thr).to.equal(160)
+				expect(updated.sqrt_kar_thr).to.equal(6)
+				expect(updated.burnikel_dispatch_thr).to.equal(80)
+				expect(updated.burnikel_leaf_thr).to.equal(64)
+				expect(updated.burnikel_off).to.equal(12)
+
+				tuning.reset_thresholds()
+				local reset = tuning.get_thresholds()
+				expect(reset.mul_split_thr).to.equal(33)
+				expect(reset.karatsuba_thr).to.equal(44)
+				expect(reset.toom3_thr).to.equal(145)
+				expect(reset.sqrt_kar_thr).to.equal(4)
+				expect(reset.burnikel_dispatch_thr).to.equal(98)
+				expect(reset.burnikel_leaf_thr).to.equal(98)
+				expect(reset.burnikel_off).to.equal(59)
+			end)
+
+			it("threshold setter accepts positive infinity where it cleanly disables a dispatch tier", function()
+				tuning.set_thresholds({
+					mul_split_thr = 1,
+					karatsuba_thr = math.huge,
+					toom3_thr = math.huge,
+					sqrt_kar_thr = math.huge,
+					burnikel_dispatch_thr = math.huge,
+					burnikel_leaf_thr = 1,
+					burnikel_off = math.huge,
+				})
+				local thresholds = tuning.get_thresholds()
+				expect(thresholds.mul_split_thr).to.equal(1)
+				expect(thresholds.karatsuba_thr).to.equal(math.huge)
+				expect(thresholds.toom3_thr).to.equal(math.huge)
+				expect(thresholds.sqrt_kar_thr).to.equal(math.huge)
+				expect(thresholds.burnikel_dispatch_thr).to.equal(math.huge)
+				expect(thresholds.burnikel_leaf_thr).to.equal(1)
+				expect(thresholds.burnikel_off).to.equal(math.huge)
+			end)
+
+			it("threshold setter still accepts fractional cutovers where direct comparisons stay coherent", function()
+				tuning.set_thresholds({
+					mul_split_thr = 1.5,
+					karatsuba_thr = 60.5,
+					toom3_thr = 160.25,
+					sqrt_kar_thr = 6.75,
+					burnikel_dispatch_thr = 80.5,
+					burnikel_leaf_thr = 64.5,
+					burnikel_off = 12.25,
+				})
+				local thresholds = tuning.get_thresholds()
+				expect(thresholds.mul_split_thr).to.equal(1.5)
+				expect(thresholds.karatsuba_thr).to.equal(60.5)
+				expect(thresholds.toom3_thr).to.equal(160.25)
+				expect(thresholds.sqrt_kar_thr).to.equal(6.75)
+				expect(thresholds.burnikel_dispatch_thr).to.equal(80.5)
+				expect(thresholds.burnikel_leaf_thr).to.equal(64.5)
+				expect(thresholds.burnikel_off).to.equal(12.25)
+			end)
+
+			it("threshold setter rejects malformed or breaking configs without mutating the current thresholds", function()
+				local original = tuning.get_thresholds()
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 34,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = 1,
+						burnikel_off = 12.25,
+					})
+				end).to.throw("mul_split_thr must be <= 33 for exactness with BASE=2^24")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 0,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = 1,
+						burnikel_off = 12.25,
+					})
+				end).to.throw("mul_split_thr must be >= 1")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 0/0,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = 1,
+						burnikel_off = 12.25,
+					})
+				end).to.throw("sqrt_kar_thr must not be NaN")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = "fast",
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = 1,
+						burnikel_off = 12.25,
+					})
+				end).to.throw("karatsuba_thr must be a number")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 0,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = 1,
+						burnikel_off = 12.25,
+					})
+				end).to.throw("sqrt_kar_thr must be >= 1")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = 0/0,
+						burnikel_leaf_thr = 1,
+						burnikel_off = 12.25,
+					})
+				end).to.throw("burnikel_dispatch_thr must not be NaN")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = 0,
+						burnikel_leaf_thr = 1,
+						burnikel_off = 12.25,
+					})
+				end).to.throw("burnikel_dispatch_thr must be >= 1")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = math.huge,
+						burnikel_off = 12.25,
+					})
+				end).to.throw("burnikel_leaf_thr must be finite")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = 0.5,
+						burnikel_off = -1,
+					})
+				end).to.throw("burnikel_leaf_thr must be >= 1")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = 1,
+					})
+				end).to.throw("burnikel_off must be a number")
+
+				expect(function()
+					tuning.set_thresholds("bad")
+				end).to.throw("threshold config must be a table")
+
+				expect(function()
+					tuning.set_thresholds({
+						mul_split_thr = 33,
+						karatsuba_thr = math.huge,
+						toom3_thr = 1.5,
+						sqrt_kar_thr = 1,
+						burnikel_dispatch_thr = math.huge,
+						burnikel_leaf_thr = 1,
+						burnikel_off = -1,
+					})
+				end).to.throw("burnikel_off must be >= 0")
+
+				expect(tuning.get_thresholds()).to.equal(original)
+			end)
+
+			it("threshold setter accepts skipped tiers when updated atomically", function()
+				tuning.set_thresholds({
+					mul_split_thr = 10,
+					karatsuba_thr = 5,
+					toom3_thr = 4,
+					sqrt_kar_thr = 6,
+					burnikel_dispatch_thr = 64,
+					burnikel_leaf_thr = 48,
+					burnikel_off = 12,
+				})
+				local thresholds = tuning.get_thresholds()
+				expect(thresholds.mul_split_thr).to.equal(10)
+				expect(thresholds.karatsuba_thr).to.equal(5)
+				expect(thresholds.toom3_thr).to.equal(4)
+				expect(thresholds.sqrt_kar_thr).to.equal(6)
+				expect(thresholds.burnikel_dispatch_thr).to.equal(64)
+				expect(thresholds.burnikel_leaf_thr).to.equal(48)
+				expect(thresholds.burnikel_off).to.equal(12)
+			end)
+
+			it("mul tuning can redirect core.mul between karatsuba and toom3", function()
+				local a = make_big(6, 281, 1)
+				local b = make_big(6, 307, -1)
+
+				tuning.set_thresholds({
+					mul_split_thr = 2,
+					karatsuba_thr = 2,
+					toom3_thr = 100,
+					sqrt_kar_thr = 4,
+					burnikel_dispatch_thr = 98,
+					burnikel_leaf_thr = 98,
+					burnikel_off = 59,
+				})
+				expect(S(core.mul(a, b))).to.equal(S(algorithms.mul_karatsuba(a, b)))
+
+				tuning.set_thresholds({
+					mul_split_thr = 2,
+					karatsuba_thr = 2,
+					toom3_thr = 3,
+					sqrt_kar_thr = 4,
+					burnikel_dispatch_thr = 98,
+					burnikel_leaf_thr = 98,
+					burnikel_off = 59,
+				})
+				expect(S(core.mul(a, b))).to.equal(S(algorithms.mul_toom3(a, b)))
+			end)
+
+			it("division and sqrt tuning can redirect core dispatch", function()
+				local a = make_big(140, 331, 1)
+				local b = make_big(100, 347, 1)
+				tuning.set_thresholds({
+					mul_split_thr = 33,
+					karatsuba_thr = 44,
+					toom3_thr = 145,
+					sqrt_kar_thr = 4,
+					burnikel_dispatch_thr = 2,
+					burnikel_leaf_thr = 98,
+					burnikel_off = 0,
+				})
+				local qCore, rCore = core.divmod(a, b)
+				local qBz, rBz = algorithms.div_burnikel(a, b)
+				expect(S(qCore)).to.equal(S(qBz))
+				expect(S(rCore)).to.equal(S(rBz))
+
+				local n = make_big(6, 389, 1)
+				tuning.set_thresholds({
+					mul_split_thr = 33,
+					karatsuba_thr = 44,
+					toom3_thr = 145,
+					sqrt_kar_thr = 100,
+					burnikel_dispatch_thr = 98,
+					burnikel_leaf_thr = 98,
+					burnikel_off = 59,
+				})
+				expect(S(core.sqrt(n))).to.equal(S(algorithms.sqrt_newton(n)))
+				tuning.set_thresholds({
+					mul_split_thr = 33,
+					karatsuba_thr = 44,
+					toom3_thr = 145,
+					sqrt_kar_thr = 3,
+					burnikel_dispatch_thr = 98,
+					burnikel_leaf_thr = 98,
+					burnikel_off = 59,
+				})
+				expect(S(core.sqrt(n))).to.equal(S(algorithms.sqrt_karatsuba(n)))
+			end)
+
+			it("burnikel dispatch and leaf thresholds are independent", function()
+				local a = make_big(140, 331, 1)
+				local b = make_big(100, 347, 1)
+				tuning.set_thresholds({
+					mul_split_thr = 33,
+					karatsuba_thr = 44,
+					toom3_thr = 145,
+					sqrt_kar_thr = 4,
+					burnikel_dispatch_thr = math.huge,
+					burnikel_leaf_thr = 2,
+					burnikel_off = 0,
+				})
+
+				local qCore, rCore = core.divmod(a, b)
+				local qKnuth, rKnuth = algorithms.div_knuth(a, b)
+				local qBz, rBz = algorithms.div_burnikel(a, b)
+				expect(S(qCore)).to.equal(S(qKnuth))
+				expect(S(rCore)).to.equal(S(rKnuth))
+				expect(S(qBz)).to.equal(S(qKnuth))
+				expect(S(rBz)).to.equal(S(rKnuth))
+			end)
+		end)
+
+		describe.tags(TAG_FULL, "internals: helpers and limb algorithms", function()
+			it("helpers preserve documented mutation semantics", function()
+				local stripped = {1, 2, 0, 0}
+				helpers.strip_zeros(stripped)
+				expect_limbs_equal(stripped, {1, 2})
+
+				expect_limbs_equal(helpers.mul_by_int({BASE - 1, 1}, 2), {BASE - 2, 3})
+
+				local q, r = helpers.div_by_int({9}, 2)
+				expect_limbs_equal(q, {4})
+				expect_limbs_equal(r, {1})
+				expect_limbs_equal(helpers.div_by_int_exact({12}, 3), {4})
+
+				expect_limbs_equal(helpers.lshift_limbs({5, 6}, 2), {0, 0, 5, 6})
+				expect_limbs_equal(helpers.get_lower({1, 2, 3, 4}, 2), {1, 2})
+				expect_limbs_equal(helpers.get_upper({1, 2, 3, 4}, 2), {3, 4})
+				expect_limbs_equal(helpers.get_slice({1, 2, 3, 4}, 2, 3), {2, 3})
+				expect_limbs_equal(helpers.join_hi_lo({3, 4}, {1, 2}, 2), {1, 2, 3, 4})
+				expect(helpers.bitlen_limbs({0, 1})).to.equal(25)
+
+				expect(helpers.cmp_abs({1, 2}, {1, 2})).to.equal(0)
+				expect(helpers.lt_abs({1}, {1, 1})).to.equal(true)
+				expect(helpers.le_abs({1, 2}, {1, 2})).to.equal(true)
+				expect(helpers.eq_abs({1, 2}, {1, 2})).to.equal(true)
+
+				expect_limbs_equal(helpers.add_limbs({BASE - 1}, {1}), {0, 1})
+				local addMut = {BASE - 1}
+				helpers.add_limbs_mut(addMut, {1})
+				expect_limbs_equal(addMut, {0, 1})
+
+				expect_limbs_equal(helpers.sub_limbs({0, 1}, {1}), {BASE - 1})
+				local subMut = {0, 1}
+				helpers.sub_limbs_mut(subMut, {1})
+				expect_limbs_equal(subMut, {BASE - 1})
+
+				local limbs, sign = helpers.add_signed({5}, 1, {7}, -1)
+				expect_limbs_equal(limbs, {2})
+				expect(sign).to.equal(-1)
+			end)
+
+			it("multiplication algorithms agree with Bint oracles and canonicalize outputs", function()
+				local aLimbs = make_limbs(12, 401)
+				local bLimbs = make_limbs(10, 433)
+				local aB = bint.from_limbs(aLimbs, 1)
+				local bB = bint.from_limbs(bLimbs, 1)
+				local expectedSmall = core.mul(aB, bB).limbs
+
+				expect_limbs_equal(algorithms.mul_schoolbook(aB, bB).limbs, expectedSmall)
+				expect_limbs_equal(algorithms.mul_schoolbook_split(aB, bB).limbs, expectedSmall)
+				expect_limbs_equal(algorithms.mul_schoolbook_unsplit(aB, bB).limbs, expectedSmall)
+				expect_limbs_equal(algorithms.mul_karatsuba(aB, bB).limbs, expectedSmall)
+
+				local bigA = make_limbs(150, 463)
+				local bigB = make_limbs(150, 487)
+				local bigAB = bint.from_limbs(bigA, 1)
+				local bigBB = bint.from_limbs(bigB, 1)
+				local expectedBig = core.mul(bigAB, bigBB).limbs
+				expect_limbs_equal(algorithms.mul_toom3(bigAB, bigBB).limbs, expectedBig)
+
+				local one = core.mul(bint.one(), bint.one())
+				expect(one.limbs[#one.limbs]).to.equal(1)
+			end)
+
+			it("division and sqrt algorithms agree with Bint oracles", function()
+				local aLimbs = make_limbs(180, 521)
+				local bLimbs = make_limbs(120, 557)
+				local a = bint.from_limbs(aLimbs, 1)
+				local b = bint.from_limbs(bLimbs, 1)
+				local qRef, rRef = core.divmod(a, b)
+
+				local qK, rK = algorithms.div_knuth(a, b)
+				expect_limbs_equal(qK.limbs, qRef.limbs)
+				expect_limbs_equal(rK.limbs, rRef.limbs)
+
+				local qB, rB = algorithms.div_burnikel(a, b)
+				expect_limbs_equal(qB.limbs, qRef.limbs)
+				expect_limbs_equal(rB.limbs, rRef.limbs)
+
+				local n = core.mul(make_big(12, 601, 1), make_big(12, 601, 1))
+				expect_limbs_equal(algorithms.sqrt_newton(n).limbs, core.sqrt(n).limbs)
+				expect_limbs_equal(algorithms.sqrt_karatsuba(n).limbs, core.sqrt(n).limbs)
 			end)
 		end)
 
@@ -1693,8 +2126,8 @@ return function(t)
 			end)
 		end)
 
-		--## Instance methods, __len, to_be trim, and Toom-3 boundary
-		-- Covers :le(), :clone(), :to_string(base), :tdiv()/:tmod(), __len at BASE edges, to_be trim, and the 123/124/125-limb mul boundary.
+		--## Instance methods, __len, to_be trim, and multiplication boundary
+		-- Covers :le(), :clone(), :to_string(base), :tdiv()/:tmod(), __len at BASE edges, to_be trim, and the current Karatsuba/Toom-3 limb boundary.
 		describe.tags(TAG_FULL, "instance methods, __len, to_be trim, and toom3 boundary", function()
 			it("a:le(b) should return correct comparisons with coercion", function()
 				local a = bint("10")
@@ -1775,9 +2208,10 @@ return function(t)
 				expect(S(bint.from_be(bint.to_be(bint("255"), true)))).to.equal("255")
 			end)
 
-			it("mul: karatsuba/toom3 threshold at 123/124/125 limbs, all 4 sign combos, match naive", function()
+			it("mul: karatsuba/toom3 threshold boundary and neighbors match naive", function()
 				local signs = {{1,1},{1,-1},{-1,1},{-1,-1}}
-				for _, len in ipairs({123, 124, 125}) do
+				local toom3Threshold = tuning.get_thresholds().toom3_thr
+				for _, len in ipairs({toom3Threshold - 1, toom3Threshold, toom3Threshold + 1}) do
 					for si, sg in ipairs(signs) do
 						local a = make_big(len, si * 307 + len, sg[1])
 						local b = make_big(len, si * 311 + len + 9, sg[2])
@@ -1787,31 +2221,33 @@ return function(t)
 			end)
 		end)
 
-		--## Algorithm-direct: correctness at arbitrary sizes
+		--## internals.algorithms: correctness at arbitrary sizes
 		-- Each algorithm is tested at sizes on both sides of the dispatch threshold,
 		-- exercising correctness that cannot be reached through core.* dispatch alone.
-			describe.tags(TAG_FULL, "algorithm-direct: correctness at arbitrary sizes", function()
+			describe.tags(TAG_FULL, "internals.algorithms: correctness at arbitrary sizes", function()
 			local signs = {{1,1},{1,-1},{-1,1},{-1,-1}}
 
 			--## Multiplication
 
-			it("mul_basecase matches naive_mul at sizes within the safe precision range", function()
-				-- mul_limbs_basecase accumulates n products of up to (2^24)^2 ≈ 2^48 each.
+			it("mul_schoolbook matches naive_mul at sizes within the safe precision range", function()
+				-- mul_limbs_schoolbook accumulates n products of up to (2^24)^2 ≈ 2^48 each.
 				-- For the sum to stay below the 2^53 IEEE-754 integer-exact boundary, n must be
-				-- small.  KARATSUBA_THR=44 is the dispatch ceiling; testing beyond it is not
+				-- small. The current Karatsuba threshold is the dispatch ceiling; testing beyond it is not
 				-- meaningful because the algorithm is not designed for larger inputs.
 				for _, len in ipairs({1, 10, 20, 43}) do
 					for si, sg in ipairs(signs) do
 						local a = make_big(len, si * 31 + len, sg[1])
 						local b = make_big(len, si * 37 + len + 5, sg[2])
-						expect(S(algorithms.mul_basecase(a, b))).to.equal(S(naive_mul(a, b)))
+						expect(S(algorithms.mul_schoolbook(a, b))).to.equal(S(naive_mul(a, b)))
 					end
 				end
 			end)
 
-			it("mul_karatsuba matches naive_mul at all sizes including below KARATSUBA_THR=44", function()
-				-- Sizes 1–43 are the key blind spot: dispatch never routes here, so bugs would go undetected.
-				for _, len in ipairs({1, 10, 44, 45, 89, 124}) do
+			it("mul_karatsuba matches naive_mul at all sizes including below the current Karatsuba threshold", function()
+				local thresholds = tuning.get_thresholds()
+				local karatsubaThreshold = thresholds.karatsuba_thr
+				local toom3Threshold = thresholds.toom3_thr
+				for _, len in ipairs({1, 10, karatsubaThreshold, karatsubaThreshold + 1, 89, toom3Threshold - 1}) do
 					for si, sg in ipairs(signs) do
 						local a = make_big(len, si * 41 + len, sg[1])
 						local b = make_big(len, si * 43 + len + 3, sg[2])
@@ -1820,9 +2256,12 @@ return function(t)
 				end
 			end)
 
-			it("mul_toom3 matches naive_mul at all sizes including below TOOM3_THR=124 and size 1", function()
+			it("mul_toom3 matches naive_mul at all sizes including below the current Toom-3 threshold and size 1", function()
 				-- Size 1 is a degenerate k=0 case; valid regression target.
-				for _, len in ipairs({1, 44, 89, 123, 124, 150}) do
+				local thresholds = tuning.get_thresholds()
+				local karatsubaThreshold = thresholds.karatsuba_thr
+				local toom3Threshold = thresholds.toom3_thr
+				for _, len in ipairs({1, karatsubaThreshold, 89, toom3Threshold - 1, toom3Threshold, toom3Threshold + 5}) do
 					for si, sg in ipairs(signs) do
 						local a = make_big(len, si * 47 + len, sg[1])
 						local b = make_big(len, si * 53 + len + 7, sg[2])
@@ -1832,16 +2271,19 @@ return function(t)
 			end)
 
 			it("mul_karatsuba and mul_toom3 match core.mul at their in-range sizes", function()
-				-- Karatsuba range: both >= 44 and both < 124
-				for _, len in ipairs({45, 63, 89}) do
+				local thresholds = tuning.get_thresholds()
+				local karatsubaThreshold = thresholds.karatsuba_thr
+				local toom3Threshold = thresholds.toom3_thr
+				-- Karatsuba range: both >= karatsuba threshold and both < toom3 threshold.
+				for _, len in ipairs({karatsubaThreshold + 1, 63, toom3Threshold - 1}) do
 					for si, sg in ipairs(signs) do
 						local a = make_big(len, si * 59 + len, sg[1])
 						local b = make_big(len, si * 61 + len + 1, sg[2])
 						expect(S(algorithms.mul_karatsuba(a, b))).to.equal(S(core.mul(a, b)))
 					end
 				end
-				-- Toom-3 range: both >= 124
-				for _, len in ipairs({124, 140, 160}) do
+				-- Toom-3 range: both >= the current Toom-3 threshold.
+				for _, len in ipairs({toom3Threshold, toom3Threshold + 16, toom3Threshold + 36}) do
 					for si, sg in ipairs(signs) do
 						local a = make_big(len, si * 67 + len, sg[1])
 						local b = make_big(len, si * 71 + len + 3, sg[2])
@@ -1850,16 +2292,16 @@ return function(t)
 				end
 			end)
 
-			it("mul_basecase: (BASE^n - 1)^2 precision regression for Comba-style accumulator", function()
+			it("mul_schoolbook: (BASE^n - 1)^2 precision regression for Comba-style accumulator", function()
 				-- (BASE^n - 1) is represented as n limbs all equal to BASE-1.
 				-- Its self-product hits the maximum column weight at the center column.
 				-- With the old single-accumulator code, at n=35 the center-column sum reaches
 				-- 35*(BASE-1)^2 ~ 35*2^48 > 2^53, losing exact integer precision.
-				-- Tested via algorithms.mul_basecase (direct) and via the full dispatch chain.
+				-- Tested via algorithms.mul_schoolbook (direct) and via the full dispatch chain.
 				for _, n in ipairs({1, 10, 35}) do
 					local limbs = table.create(n, BASE - 1)
 					local a = bint.from_limbs(limbs, 1)
-					expect(S(algorithms.mul_basecase(a, a))).to.equal(S(naive_mul(a, a)))
+					expect(S(algorithms.mul_schoolbook(a, a))).to.equal(S(naive_mul(a, a)))
 				end
 			end)
 
@@ -1871,7 +2313,7 @@ return function(t)
 					local a = bint.from_limbs(limbs, 1)
 					local expected = S(naive_mul(a, a))
 					expect(S(core.mul(a, a))).to.equal(expected)
-					if n <= 123 then
+					if n < tuning.get_thresholds().toom3_thr then
 						expect(S(algorithms.mul_karatsuba(a, a))).to.equal(expected)
 					else
 						expect(S(algorithms.mul_toom3(a, a))).to.equal(expected)
@@ -1960,8 +2402,8 @@ return function(t)
 			end)
 
 			it("div_burnikel matches core.divmod at small/medium/large sizes with all sign combos", function()
-				-- Small/medium operands (< BURNIKEL_THR=232): outer BZ driver + internal Knuth fallback.
-				-- Large operands (both > 232, diff > 40): real BZ path.
+				-- Small/medium operands below the current Burnikel threshold use the Knuth fallback.
+				-- Larger operands with a large enough numerator/denominator gap use the real BZ path.
 				for _, pair in ipairs({{5, 3}, {100, 60}, {350, 300}}) do
 					for si, sg in ipairs(signs) do
 						local a = make_big(pair[1], si * 83 + pair[1], sg[1])
@@ -1994,7 +2436,7 @@ return function(t)
 				end
 			end)
 
-			it("sqrt_karatsuba satisfies isqrt inequalities for limb counts 1–70 including below SQRT_KAR_THR=4", function()
+			it("sqrt_karatsuba satisfies isqrt inequalities for limb counts 1–70 including below the current sqrt threshold", function()
 				local one = bint.one()
 				for i = 1, 70 do
 					local n = make_big(i, i * 191 + 11, 1)
@@ -2005,12 +2447,12 @@ return function(t)
 			end)
 
 			it("sqrt_newton and sqrt_karatsuba match core.sqrt at their natural sizes", function()
-				-- sqrt_newton matches at small sizes (below SQRT_KAR_THR=4)
+				-- sqrt_newton matches at small sizes below the current sqrt threshold.
 				for i = 1, 3 do
 					local n = make_big(i, i * 197 + 5, 1)
 					expect(S(algorithms.sqrt_newton(n))).to.equal(S(core.sqrt(n)))
 				end
-				-- sqrt_karatsuba matches at sizes on and above SQRT_KAR_THR=4
+				-- sqrt_karatsuba matches at sizes on and above the current sqrt threshold.
 				for i = 4, 30 do
 					local n = make_big(i, i * 199 + 7, 1)
 					expect(S(algorithms.sqrt_karatsuba(n))).to.equal(S(core.sqrt(n)))
@@ -2019,12 +2461,12 @@ return function(t)
 
 			--## Immutability
 
-			it("algorithm wrappers do not mutate their operands", function()
+			it("internals algorithm wrappers do not mutate their operands", function()
 				local a = make_big(50, 313, 1)
 				local b = make_big(50, 317, -1)
 				local sa, sb = S(a), S(b)
 
-				local _ = algorithms.mul_basecase(a, b)
+				local _ = algorithms.mul_schoolbook(a, b)
 				expect(S(a)).to.equal(sa); expect(S(b)).to.equal(sb)
 				_ = algorithms.mul_karatsuba(a, b)
 				expect(S(a)).to.equal(sa); expect(S(b)).to.equal(sb)
@@ -2098,7 +2540,7 @@ return function(t)
 				end
 			end)
 
-			it("all public algorithm wrappers are exactly correct on dense safe ranges", function()
+			it("all public internals algorithm wrappers are exactly correct on dense safe ranges", function()
 				local lo, hi = -96, 96
 				local ints = make_int_cache(lo, hi)
 
@@ -2108,7 +2550,7 @@ return function(t)
 						local B = ints[b]
 						local expectedMul = a * b
 
-						expect_exact_int(algorithms.mul_basecase(A, B), expectedMul)
+						expect_exact_int(algorithms.mul_schoolbook(A, B), expectedMul)
 						expect_exact_int(algorithms.mul_karatsuba(A, B), expectedMul)
 						expect_exact_int(algorithms.mul_toom3(A, B), expectedMul)
 
@@ -2132,7 +2574,7 @@ return function(t)
 				end
 			end)
 
-			it("large-limb multiplication corpus: algorithms and core agree with naive/differential oracles", function()
+			it("large-limb multiplication corpus: internals algorithms and core agree with naive/differential oracles", function()
 				local signs = {{1,1},{1,-1},{-1,1},{-1,-1}}
 
 				-- Threshold-heavy exact anchors against independent schoolbook oracle.
@@ -2192,7 +2634,7 @@ return function(t)
 				local signs = {{1,1},{1,-1},{-1,1},{-1,-1}}
 
 				for _, pr in ipairs({
-					{273, 232}, -- BZ threshold boundary with diff > 40
+					{273, 232}, -- BZ-sized divisor with diff > 40
 					{320, 233}, -- regression: BZ didn't unshift remainder by `shift` words (shift=1 for 233-limb divisor)
 					{420, 280},
 					{540, 300},
@@ -2221,14 +2663,14 @@ return function(t)
 				-- Regression for non-canonical quotient arrays reaching mul_limbs via BZ internals.
 				-- Two paths produce trailing-zero quotients:
 				--   (a) div_knuths pre-allocates quotient with tcreate(m+1, 0) and doesn't strip;
-				--       when div_bz_2n1n falls back to Knuth (odd bLen or bLen < BURNIKEL_THR),
+				--       when div_bz_2n1n falls back to Knuth because the recursive divisor is odd or too small,
 				--       the unstripped quotient returns directly to div_bz_3n2n.
 				--   (b) div_bz_2n1n builds Q = lshift(q1,k)+q2; if q1 from the correction loop
 				--       had its top limb decremented to 0, Q inherits the trailing zero.
 				-- In both cases, mul_limbs(q, b2) in div_bz_3n2n receives an inflated array,
 				-- mis-dispatches to Toom-3, and lt_abs (length-first) corrupts the vm1 sign.
 
-				-- Case 1: deep BZ recursion (divisor >= 2×BURNIKEL_THR = 464 limbs).
+				-- Case 1: deep BZ recursion with a very large divisor.
 				-- Exercises path (b): recursive div_bz_2n1n → div_bz_3n2n → div_bz_2n1n.
 				for i = 1, 8 do
 					local signA = (i % 2 == 0) and 1 or -1
@@ -2246,7 +2688,7 @@ return function(t)
 				-- Case 2: BZ with Knuth fallback producing unstripped quotient.
 				-- Exercises path (a): div_bz_2n1n falls to div_knuths (odd or small b1),
 				-- returning a non-canonical q to div_bz_3n2n → mul_limbs(q, b2).
-				-- Divisor sized so the recursive b1 = upper(B, k) has odd length or < BURNIKEL_THR.
+				-- Divisor sized so the recursive b1 = upper(B, k) has odd length or falls back to Knuth.
 				for _, pr in ipairs({{500, 233}, {600, 279}, {750, 351}}) do
 					for i = 1, 4 do
 						local signA = (i % 2 == 0) and 1 or -1

@@ -46,18 +46,25 @@ values and performs no coercion or input validation.
 
 --# CONSTANTS
 
-local BASE          = 2^24                  -- 16777216; limb*limb < 2^53 (safe in doubles)
-local BASE_MASK     = 0xFFFFFF              -- BASE - 1
-local BASE_POW      = 24
-local RADIX_CHUNK   = 1e8                   -- 10^8; for decimal I/O chunking
-local MUL_SPLIT_THR = 33                    -- switch unsplit -> split schoolbook at this min-limb width
-local KARATSUBA_THR = 44                    -- switch to Karatsuba (limbs)
-local TOOM3_THR     = 145                   -- switch to Toom-3 (limbs)
-local SQRT_KAR_THR  = 4                     -- Karatsuba sqrt threshold (limbs)
-local BURNIKEL_THR  = 98                   -- switch to Burnikel-Ziegler (limbs)
-local BURNIKEL_OFF  = 59                    -- minimum BZ numerator-denominator offset
+local BASE                           = 2^24                  -- 16777216; limb*limb < 2^53 (safe in doubles)
+local BASE_MASK                      = 0xFFFFFF              -- BASE - 1
+local BASE_POW                       = 24
+local RADIX_CHUNK                    = 1e8                   -- 10^8; for decimal I/O chunking
+local DEFAULT_MUL_SPLIT_THR          = 33                    -- switch unsplit -> split schoolbook at this min-limb width
+local DEFAULT_KARATSUBA_THR          = 44                    -- switch to Karatsuba (limbs)
+local DEFAULT_TOOM3_THR              = 145                   -- switch to Toom-3 (limbs)
+local DEFAULT_SQRT_KAR_THR           = 4                     -- Karatsuba sqrt threshold (limbs)
+local DEFAULT_BURNIKEL_DISPATCH_THR  = 98                    -- switch to Burnikel-Ziegler at the top level (limbs)
+local DEFAULT_BURNIKEL_LEAF_THR      = 98                    -- recurse with Burnikel-Ziegler until this divisor width (limbs)
+local DEFAULT_BURNIKEL_OFF           = 59                    -- minimum BZ numerator-denominator offset
 
-assert(MUL_SPLIT_THR <= 33, "MUL_SPLIT_THR must be <= 33 for exactness with BASE=2^24")
+assert(DEFAULT_MUL_SPLIT_THR <= 33, "DEFAULT_MUL_SPLIT_THR must be <= 33 for exactness with BASE=2^24")
+assert(DEFAULT_SQRT_KAR_THR >= 1, "DEFAULT_SQRT_KAR_THR must be >= 1")
+assert(DEFAULT_BURNIKEL_DISPATCH_THR >= 1, "DEFAULT_BURNIKEL_DISPATCH_THR must be >= 1")
+assert(DEFAULT_BURNIKEL_LEAF_THR >= 1, "DEFAULT_BURNIKEL_LEAF_THR must be >= 1")
+assert(DEFAULT_BURNIKEL_OFF >= 0, "DEFAULT_BURNIKEL_OFF must be >= 0")
+
+local RADIX_LEN_K   = BASE_POW * math.log10(2)   -- for __len
 
 --# UPVALUE ALIASES
 
@@ -85,7 +92,13 @@ local slen    = string.len
 local sfind   = string.find
 local sreverse = string.reverse
 
-local RADIX_LEN_K   = BASE_POW * log10(2)   -- for __len
+local mulSplitThr: number = DEFAULT_MUL_SPLIT_THR
+local karatsubaThr: number = DEFAULT_KARATSUBA_THR
+local toom3Thr: number = DEFAULT_TOOM3_THR
+local sqrtKarThr: number = DEFAULT_SQRT_KAR_THR
+local burnikelDispatchThr: number = DEFAULT_BURNIKEL_DISPATCH_THR
+local burnikelLeafThr: number = DEFAULT_BURNIKEL_LEAF_THR
+local burnikelOff: number = DEFAULT_BURNIKEL_OFF
 
 --# TYPES
 
@@ -388,7 +401,7 @@ end
 -- Schoolbook dispatcher: use the unsplit path below the split threshold (kept <= 33 for exactness).
 local function mul_limbs_schoolbook_dispatch(a: {number}, b: {number}): {number}
 	local an, bn = #a, #b
-	if mmin(an, bn) < MUL_SPLIT_THR then
+	if mmin(an, bn) < mulSplitThr then
 		return mul_limbs_schoolbook_unsplit(a, b)
 	end
 	return mul_limbs_schoolbook_split(a, b)
@@ -484,11 +497,11 @@ end
 mul_limbs = function(a: {number}, b: {number}): {number}
 	local an, bn = #a, #b
 	local result: {number}
-	if an < MUL_SPLIT_THR or bn < MUL_SPLIT_THR then
+	if an < mulSplitThr or bn < mulSplitThr then
 		result = mul_limbs_schoolbook_unsplit(a, b)
-	elseif an < KARATSUBA_THR or bn < KARATSUBA_THR then
+	elseif an < karatsubaThr or bn < karatsubaThr then
 		result = mul_limbs_schoolbook_split(a, b)
-	elseif an < TOOM3_THR or bn < TOOM3_THR then
+	elseif an < toom3Thr or bn < toom3Thr then
 		result = mul_limbs_karatsuba(a, b)
 	else
 		result = mul_limbs_toom3(a, b)
@@ -646,7 +659,7 @@ div_bz_2n1n = function(A: {number}, B: {number}): ({number}, {number})
 		return q, r
 	end
 
-	if bLen % 2 == 1 or bLen < BURNIKEL_THR then
+	if bLen % 2 == 1 or bLen < burnikelLeafThr then
 		return div_limbs_knuth(A, B)
 	end
 
@@ -668,7 +681,7 @@ end
 local function div_limbs_burnikel(A: {number}, B: {number}): ({number}, {number})
 	local s = #B
 
-	local m = 2 ^ floor(mlog(s / BURNIKEL_THR, 2) + 1)
+	local m = 2 ^ floor(mlog(s / burnikelLeafThr, 2) + 1)
 	local j = ceil(s / m)
 	local n = j * m
 
@@ -722,7 +735,7 @@ end
 div_limbs = function(a: {number}, b: {number}): ({number}, {number})
 	local diff = #a - #b
 	local q, r: {number}
-	if #a > BURNIKEL_THR and #b > BURNIKEL_THR and diff > BURNIKEL_OFF then
+	if #a > burnikelDispatchThr and #b > burnikelDispatchThr and diff > burnikelOff then
 		q, r = div_limbs_burnikel(a, b)
 	else
 		q, r = div_limbs_knuth(a, b)
@@ -758,7 +771,7 @@ end
 -- Karatsuba square root; returns (s, r) where s² + r = n.
 local function sqrt_limbs_karatsuba(n: {number}): ({number}, {number})
 	local limbLen = #n
-	if limbLen < SQRT_KAR_THR then
+	if limbLen < sqrtKarThr then
 		local sq = sqrt_limbs_newton(n)
 		return sq, sub_limbs(n, mul_limbs(sq, sq))
 	end
@@ -801,7 +814,7 @@ end
 
 -- Dispatch sqrt; returns the root only.
 local function sqrt_limbs(n: {number}): {number}
-	if #n >= SQRT_KAR_THR then
+	if #n >= sqrtKarThr then
 		local s, _ = sqrt_limbs_karatsuba(n)
 		return s
 	end
@@ -1924,50 +1937,149 @@ Bint.to_sci			= bint.to_sci
 Bint.to_le			= bint.to_le
 Bint.to_be			= bint.to_be
 
---# ALGORITHMS
--- Direct algorithm entry points. Each function has the same contract as its core.* counterpart
--- (same sign handling, error conditions, and floor/isqrt semantics) but bypasses the automatic
--- threshold dispatch at the top-level entry point.
--- Use these for benchmarking threshold crossover points and for validating the named
--- top-level algorithm entry path. Recursive subproblems may still dispatch/fallback
--- internally based on thresholds (see per-wrapper notes).
+--# TUNING
 
--- Shared sign wrapper for multiplication algorithms.
-local function wrap_mul_algorithm(a: Bint, b: Bint, limb_fn: ({number}, {number}) -> {number}): Bint
+type ThresholdConfig = {
+	mul_split_thr: number,
+	karatsuba_thr: number,
+	toom3_thr: number,
+	sqrt_kar_thr: number,
+	burnikel_dispatch_thr: number,
+	burnikel_leaf_thr: number,
+	burnikel_off: number,
+}
+
+local tuning = {}
+
+function tuning.get_thresholds(): ThresholdConfig
+	return {
+		mul_split_thr = mulSplitThr,
+		karatsuba_thr = karatsubaThr,
+		toom3_thr = toom3Thr,
+		sqrt_kar_thr = sqrtKarThr,
+		burnikel_dispatch_thr = burnikelDispatchThr,
+		burnikel_leaf_thr = burnikelLeafThr,
+		burnikel_off = burnikelOff,
+	}
+end
+
+local function expect_number(value: any, name: string): number
+	if type(value) ~= "number" then
+		error(name .. " must be a number", 3)
+	end
+	if value ~= value then
+		error(name .. " must not be NaN", 3)
+	end
+	return value
+end
+
+function tuning.set_thresholds(config: ThresholdConfig)
+	if type(config) ~= "table" then
+		error("threshold config must be a table", 2)
+	end
+
+	local mulSplit = expect_number(config.mul_split_thr, "mul_split_thr")
+	if mulSplit < 1 then
+		error("mul_split_thr must be >= 1", 2)
+	elseif mulSplit > 33 then
+		error("mul_split_thr must be <= 33 for exactness with BASE=2^24", 2)
+	end
+
+	local karatsuba = expect_number(config.karatsuba_thr, "karatsuba_thr")
+	if karatsuba < 1 then
+		error("karatsuba_thr must be >= 1", 2)
+	end
+
+	local toom3 = expect_number(config.toom3_thr, "toom3_thr")
+	if toom3 < 1 then
+		error("toom3_thr must be >= 1", 2)
+	end
+
+	local sqrtKar = expect_number(config.sqrt_kar_thr, "sqrt_kar_thr")
+	if sqrtKar < 1 then
+		error("sqrt_kar_thr must be >= 1", 2)
+	end
+
+	local burnikelDispatch = expect_number(config.burnikel_dispatch_thr, "burnikel_dispatch_thr")
+	if burnikelDispatch < 1 then
+		error("burnikel_dispatch_thr must be >= 1", 2)
+	end
+
+	local burnikelLeaf = expect_number(config.burnikel_leaf_thr, "burnikel_leaf_thr")
+	if burnikelLeaf < 1 then
+		error("burnikel_leaf_thr must be >= 1", 2)
+	elseif burnikelLeaf == math.huge then
+		error("burnikel_leaf_thr must be finite", 2)
+	end
+
+	local burnikelOffset = expect_number(config.burnikel_off, "burnikel_off")
+	if burnikelOffset < 0 then
+		error("burnikel_off must be >= 0", 2)
+	end
+
+	mulSplitThr = mulSplit
+	karatsubaThr = karatsuba
+	toom3Thr = toom3
+	sqrtKarThr = sqrtKar
+	burnikelDispatchThr = burnikelDispatch
+	burnikelLeafThr = burnikelLeaf
+	burnikelOff = burnikelOffset
+end
+
+function tuning.reset_thresholds()
+	mulSplitThr = DEFAULT_MUL_SPLIT_THR
+	karatsubaThr = DEFAULT_KARATSUBA_THR
+	toom3Thr = DEFAULT_TOOM3_THR
+	sqrtKarThr = DEFAULT_SQRT_KAR_THR
+	burnikelDispatchThr = DEFAULT_BURNIKEL_DISPATCH_THR
+	burnikelLeafThr = DEFAULT_BURNIKEL_LEAF_THR
+	burnikelOff = DEFAULT_BURNIKEL_OFF
+end
+
+--# INTERNALS
+-- Expert-facing, unstable internals. Each algorithms.* entry has the same sign-handling
+-- contract as its core.* counterpart (same zero/negative semantics, floor-div, isqrt)
+-- but bypasses the automatic threshold dispatch at the top-level entry point.
+-- Use for benchmarking crossover points and exercising named algorithm paths directly.
+-- Recursive sub-problems may still dispatch through mul_limbs/div_limbs internally.
+
+-- Shared sign wrapper for multiplication algorithm entry points.
+local function wrap_mul(a: Bint, b: Bint, fn: ({number}, {number}) -> {number}): Bint
 	local as, bs = a.signum, b.signum
 	if as == 0 or bs == 0 then return make_zero() end
-	return from_raw(limb_fn(a.limbs, b.limbs), as * bs > 0 and 1 or -1)
+	return from_raw(fn(a.limbs, b.limbs), as * bs)
 end
 
 local algorithms = {}
 
---- Multiply using schoolbook O(n²) algorithm, regardless of operand size.
-function algorithms.mul_basecase(a: Bint, b: Bint): Bint
-	return wrap_mul_algorithm(a, b, mul_limbs_schoolbook_dispatch)
+--- Multiply using the schoolbook O(n²) dispatcher. Routes between split/unsplit based on
+--- the current mulSplitThr. Bypasses Karatsuba/Toom-3 dispatch.
+function algorithms.mul_schoolbook(a: Bint, b: Bint): Bint
+	return wrap_mul(a, b, mul_limbs_schoolbook_dispatch)
 end
 
 --- Multiply using the split-accumulator schoolbook O(n²) algorithm.
---- This is the always-safe basecase implementation used as the fallback/reference path.
-function algorithms.mul_split(a: Bint, b: Bint): Bint
-	return wrap_mul_algorithm(a, b, mul_limbs_schoolbook_split)
+--- Always safe for any operand size.
+function algorithms.mul_schoolbook_split(a: Bint, b: Bint): Bint
+	return wrap_mul(a, b, mul_limbs_schoolbook_split)
 end
 
 --- Multiply using the unsplit single-accumulator schoolbook O(n²) algorithm.
---- Callers must ensure operand sizes stay within the exact-safe bound for BASE=2^24 (<= 32 limbs).
-function algorithms.mul_unsplit(a: Bint, b: Bint): Bint
-	return wrap_mul_algorithm(a, b, mul_limbs_schoolbook_unsplit)
+--- Only exact for operands where min(#a, #b) <= DEFAULT_MUL_SPLIT_THR (32 limbs) with BASE=2^24.
+function algorithms.mul_schoolbook_unsplit(a: Bint, b: Bint): Bint
+	return wrap_mul(a, b, mul_limbs_schoolbook_unsplit)
 end
 
---- Multiply using Karatsuba O(n^1.585) algorithm at the top level, regardless of operand size.
---- Recursive sub-problems are dispatched through mul_limbs and may use basecase internally.
+--- Multiply using Karatsuba O(n^1.585) at the top level. Recursive sub-problems may
+--- fall back to schoolbook internally via mul_limbs dispatch.
 function algorithms.mul_karatsuba(a: Bint, b: Bint): Bint
-	return wrap_mul_algorithm(a, b, mul_limbs_karatsuba)
+	return wrap_mul(a, b, mul_limbs_karatsuba)
 end
 
---- Multiply using Toom-Cook 3-way O(n^1.465) algorithm at the top level, regardless of operand size.
---- Recursive sub-problems are dispatched through mul_limbs and may use basecase or Karatsuba internally.
+--- Multiply using Toom-Cook 3-way O(n^1.465) at the top level. Recursive sub-problems
+--- may use schoolbook or Karatsuba internally via mul_limbs dispatch.
 function algorithms.mul_toom3(a: Bint, b: Bint): Bint
-	return wrap_mul_algorithm(a, b, mul_limbs_toom3)
+	return wrap_mul(a, b, mul_limbs_toom3)
 end
 
 --- Floor-divide using Knuth Algorithm D, regardless of operand size.
@@ -1976,24 +2088,51 @@ function algorithms.div_knuth(a: Bint, b: Bint): (Bint, Bint)
 end
 
 --- Floor-divide using the Burnikel-Ziegler outer driver, regardless of operand size.
---- Note: div_limbs_burnikel falls back to Knuth when the divisor is below BURNIKEL_THR limbs.
+--- Falls back to Knuth internally when the recursive divisor is odd or below burnikelLeafThr.
 function algorithms.div_burnikel(a: Bint, b: Bint): (Bint, Bint)
 	return divmod_mode(a, b, true, div_limbs_burnikel)
 end
 
---- Compute the integer square root using Newton-Heron iteration, regardless of operand size.
+--- Compute isqrt using Newton-Heron iteration, regardless of operand size.
 function algorithms.sqrt_newton(a: Bint): Bint
 	if a.signum ~= 1 then return make_zero() end
 	return from_raw(sqrt_limbs_newton(a.limbs), 1)
 end
 
---- Compute the integer square root using the Karatsuba-recursive algorithm, regardless of size.
---- Note: sqrt_limbs_karatsuba falls back to Newton for inputs below SQRT_KAR_THR limbs.
+--- Compute isqrt using the Karatsuba-recursive algorithm, regardless of operand size.
+--- Falls back to Newton internally for inputs below sqrtKarThr.
 function algorithms.sqrt_karatsuba(a: Bint): Bint
 	if a.signum ~= 1 then return make_zero() end
 	local s, _ = sqrt_limbs_karatsuba(a.limbs)
 	return from_raw(s, 1)
 end
+
+local helpers = {
+	strip_zeros = strip_zeros,
+	mul_by_int = mul_by_int,
+	div_by_int = div_by_int,
+	div_by_int_exact = div_by_int_exact,
+	lshift_limbs = lshift_limbs,
+	get_lower = get_lower,
+	get_upper = get_upper,
+	get_slice = get_slice,
+	join_hi_lo = join_hi_lo,
+	bitlen_limbs = bitlen_limbs,
+	cmp_abs = cmp_abs,
+	lt_abs = lt_abs,
+	le_abs = le_abs,
+	eq_abs = eq_abs,
+	add_limbs = add_limbs,
+	add_limbs_mut = add_limbs_mut,
+	sub_limbs = sub_limbs,
+	sub_limbs_mut = sub_limbs_mut,
+	add_signed = add_signed,
+}
+
+local internals = {
+	algorithms = algorithms,
+	helpers = helpers,
+}
 
 --# API
 
@@ -2005,5 +2144,6 @@ end })
 return {
 	bint = bint,
 	core = core,
-	algorithms = algorithms,
+	tuning = tuning,
+	internals = internals,
 }
