@@ -1,4 +1,6 @@
 /.npm-cache
+/bench/base
+/sourcemap.json
 /node_modules
 /out
 /include
