@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-03-05
+
+### Added
+
+- `tuning` export for runtime algorithm dispatch control:
+  - `tuning.get_thresholds()` — returns the current `BintThresholds` configuration table.
+  - `tuning.set_thresholds(config)` — atomically updates all thresholds; rejects missing keys, NaN, and out-of-range values.
+  - `tuning.reset_thresholds()` — restores built-in defaults.
+  - Configurable fields: `mul_split_thr`, `karatsuba_thr`, `toom3_thr`, `sqrt_kar_thr`, `burnikel_dispatch_thr`, `burnikel_leaf_thr`, `burnikel_off`.
+- `internals` export (marked `@internal`) exposing `internals.algorithms` and `internals.helpers` for direct low-level access. Replaces the previous top-level `algorithms` export.
+- `internals.algorithms.mul_schoolbook_split` and `internals.algorithms.mul_schoolbook_unsplit` — individual schoolbook paths for benchmarking the split/unsplit crossover.
+- Comparison benchmark (`bench/cmp.luau`) measuring bint against helloGMP and AptInt across add, sub, mul, div, pow, isqrt, parse, format, endian, and sci operations.
+
+### Changed
+
+- **Breaking (previously unstable):** Top-level `algorithms` export moved to `internals.algorithms`. The `algorithms` table was already documented as unstable/internal; it now lives under `internals.algorithms` alongside `internals.helpers`.
+- `algorithms.mul_basecase` renamed to `internals.algorithms.mul_schoolbook` (dispatch-aware schoolbook entry point). The individual split/unsplit variants are exposed alongside it.
+- Multiplication schoolbook path split into an exact-safe unsplit variant and an always-safe split variant, dispatched by a new `mul_split_thr` threshold (default: 33 limbs). This avoids unnecessary carry-splitting overhead for small operands while preserving correctness at all sizes.
+- Dispatch thresholds retuned relative to v0.3.0 for better practical throughput:
+  - `toom3_thr`: 124 → 145 (prefer Karatsuba longer before entering Toom-3)
+  - `burnikel_dispatch_thr`: 232 → 98 (enter Burnikel-Ziegler earlier for large divisions)
+  - `burnikel_off`: 40 → 59 (tighter numerator-denominator offset gate)
+- Docstrings moved from metamethods (`__add`, `__sub`, …) to instance method assignments (`add`, `sub`, …); IDEs and doc generators now surface operator documentation correctly.
+- `BintInternals`, `BintHelpers`, and `BintAlgorithms` TypeScript interfaces marked `@internal`.
+
+### Fixed
+
+- `Bint` is now exported as a metatable-backed type (`typeof(setmetatable(…))`), so Luau strict-mode operator overloads (`+`, `-`, `*`, etc.) resolve correctly. Previously, `Bint` was a plain data-table type and expressions like `a + b` failed with "no corresponding overload for `__add`".
+
 ## [0.3.0] - 2026-02-25
 
 ### Added

@@ -4,9 +4,9 @@ Arbitrary-precision signed integer library for Luau.
 
 `bint` stores integers as little-endian base-`2^24` limbs, so values can grow without fixed-width overflow. It supports idiomatic operators (`+`, `-`, `*`, `//`, `%`, `^`, comparisons), plus a lower-level `core` API with mutating and non-mutating functions.
 
-`v0.3.0` renames all conversion helpers to a uniform `to_*`/`from_*` convention, adds lossy scientific-notation decomposition (`to_sci`), and fixes several Burnikel-Ziegler division edge cases.
+`v0.4.0` adds a `tuning` API for runtime dispatch control, restructures internals into a clearly-scoped `internals` export, splits the schoolbook multiplication path for better small-operand performance, retunes dispatch thresholds, and fixes Luau strict-mode operator overloads in TypeScript declarations.
 
-Latest release: `0.3.0`.
+Latest release: `0.4.0`.
 
 ## Features
 
@@ -74,13 +74,31 @@ For `roblox-ts` / TypeScript users, the standard non-mutating arithmetic/compari
 - Division (truncated): `tdivmod`, `tdiv`, `tmod`
 - Other: `pow`, `sqrt`, `lshift`, `rshift`, `lshift_words`, `rshift_words`
 
-### `algorithms` entry points
+### `tuning`
 
-Direct algorithm entry points that bypass automatic threshold dispatch at the top-level call. Each function has the same contract as its `core` counterpart and forces the named top-level algorithm regardless of operand size; recursive subproblems may still dispatch/fallback internally. Useful for benchmarking threshold crossover points and validating specific algorithm entry paths.
+Runtime control over algorithm dispatch crossover points. All changes take effect immediately and apply to every subsequent operation.
 
-- Multiplication: `algorithms.mul_basecase`, `algorithms.mul_karatsuba`, `algorithms.mul_toom3`
-- Division: `algorithms.div_knuth`, `algorithms.div_burnikel`
-- Square root: `algorithms.sqrt_newton`, `algorithms.sqrt_karatsuba`
+- `tuning.get_thresholds(): BintThresholds` — returns the current configuration.
+- `tuning.set_thresholds(config: BintThresholds)` — atomically updates all thresholds; rejects missing keys, NaN, and out-of-range values.
+- `tuning.reset_thresholds()` — restores built-in defaults.
+
+`BintThresholds` fields (all in limb counts unless noted):
+
+| Field | Default | Description |
+|---|---|---|
+| `mul_split_thr` | 33 | max limbs for exact-safe unsplit schoolbook (must be ≤ 33) |
+| `karatsuba_thr` | 44 | min limbs to enter Karatsuba |
+| `toom3_thr` | 145 | min limbs to enter Toom-3 |
+| `sqrt_kar_thr` | — | min limbs to enter Karatsuba sqrt |
+| `burnikel_dispatch_thr` | 98 | min divisor limbs to enter Burnikel-Ziegler |
+| `burnikel_leaf_thr` | 98 | recursion leaf size for Burnikel-Ziegler |
+| `burnikel_off` | 59 | min numerator-denominator limb offset for Burnikel-Ziegler |
+
+`Infinity` is accepted for `karatsuba_thr`, `toom3_thr`, `sqrt_kar_thr`, `burnikel_dispatch_thr`, and `burnikel_off` to disable that tier.
+
+### `internals` (unstable)
+
+Low-level access for benchmarking and testing. Marked `@internal` — the shape may change between releases without a semver bump.
 
 ## Operator behavior
 
