@@ -102,11 +102,57 @@ local burnikelOff: number = DEFAULT_BURNIKEL_OFF
 
 --# TYPES
 
-export type Bint = {
+type BintData = {
 	limbs: {number},
 	signum: number,
 }
+
 export type BintArg = Bint | number | string
+
+type BintMetatable = {
+	__index: BintMetatable,
+	__add: (a: BintArg, b: BintArg) -> Bint,
+	__sub: (a: BintArg, b: BintArg) -> Bint,
+	__mul: (a: BintArg, b: BintArg) -> Bint,
+	__idiv: (a: BintArg, b: BintArg) -> Bint,
+	__mod: (a: BintArg, b: BintArg) -> Bint,
+	__pow: (a: BintArg, b: BintArg) -> Bint,
+	__unm: (a: BintArg) -> Bint,
+	__eq: (a: BintArg, b: BintArg) -> boolean,
+	__lt: (a: BintArg, b: BintArg) -> boolean,
+	__le: (a: BintArg, b: BintArg) -> boolean,
+	__tostring: (a: Bint) -> string,
+	__len: (a: Bint) -> number,
+	clone: (self: Bint) -> Bint,
+	abs: (self: Bint) -> Bint,
+	neg: (self: Bint) -> Bint,
+	cmp: (self: Bint, other: BintArg) -> number,
+	eq: (self: Bint, other: BintArg) -> boolean,
+	lt: (self: Bint, other: BintArg) -> boolean,
+	le: (self: Bint, other: BintArg) -> boolean,
+	add: (self: Bint, other: BintArg) -> Bint,
+	sub: (self: Bint, other: BintArg) -> Bint,
+	mul: (self: Bint, other: BintArg) -> Bint,
+	divmod: (self: Bint, other: BintArg) -> (Bint, Bint),
+	idiv: (self: Bint, other: BintArg) -> Bint,
+	mod: (self: Bint, other: BintArg) -> Bint,
+	tdivmod: (self: Bint, other: BintArg) -> (Bint, Bint),
+	tdiv: (self: Bint, other: BintArg) -> Bint,
+	tmod: (self: Bint, other: BintArg) -> Bint,
+	pow: (self: Bint, other: BintArg) -> Bint,
+	sqrt: (self: Bint) -> Bint,
+	lshift: (self: Bint, n: number) -> Bint,
+	rshift: (self: Bint, n: number) -> Bint,
+	lshift_words: (self: Bint, n: number) -> Bint,
+	rshift_words: (self: Bint, n: number) -> Bint,
+	to_string: (self: Bint, base: number?) -> string,
+	to_number: (self: Bint) -> number,
+	to_sci: (self: Bint) -> (number, number),
+	to_le: (self: Bint, trim: boolean?) -> string,
+	to_be: (self: Bint, trim: boolean?) -> string,
+}
+
+export type Bint = typeof(setmetatable({} :: BintData, {} :: BintMetatable))
 
 --# LIMB HELPERS
 -- Private, unsigned. Operate on raw {number} arrays.
