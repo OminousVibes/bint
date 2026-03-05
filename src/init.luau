@@ -1752,34 +1752,18 @@ end
 --# METATABLE
 -- Thin wrappers over core; coerces both sides of each operator.
 
---- Add two values.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return A new Bint equal to a + b.
 Bint.__add = function(a: BintArg, b: BintArg): Bint
 	return core.add(coerce(a), coerce(b))
 end
 
---- Subtract b from a.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return A new Bint equal to a - b.
 Bint.__sub = function(a: BintArg, b: BintArg): Bint
 	return core.sub(coerce(a), coerce(b))
 end
 
---- Multiply two values.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return A new Bint equal to a * b.
 Bint.__mul = function(a: BintArg, b: BintArg): Bint
 	return core.mul(coerce(a), coerce(b))
 end
 
---- Perform floor integer division.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return A new Bint equal to a // b.
 Bint.__idiv = function(a: BintArg, b: BintArg): Bint
 	return core.idiv(coerce(a), coerce(b))
 end
@@ -1790,55 +1774,30 @@ Bint.__div = function(): never
 	error("bint: '/' is not supported for integers; use '//' for floor division", 2)
 end
 
---- Compute the floor-division remainder.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return A new Bint equal to a % b.
 Bint.__mod = function(a: BintArg, b: BintArg): Bint
 	return core.mod(coerce(a), coerce(b))
 end
 
---- Raise a to the power b.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return A new Bint equal to a ^ b.
 Bint.__pow = function(a: BintArg, b: BintArg): Bint
 	return core.pow(coerce(a), coerce(b))
 end
 
---- Negate a.
---- @param a A BintArg.
---- @return A new Bint equal to -a.
 Bint.__unm = function(a: BintArg): Bint
 	return core.neg(coerce(a))
 end
 
---- Test two values for equality.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return True if a == b.
 Bint.__eq = function(a: BintArg, b: BintArg): boolean
 	return core.eq(coerce(a), coerce(b))
 end
 
---- Test if a is strictly less than b.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return True if a < b.
 Bint.__lt = function(a: BintArg, b: BintArg): boolean
 	return core.lt(coerce(a), coerce(b))
 end
 
---- Test if a is less than or equal to b.
---- @param a A BintArg.
---- @param b A BintArg.
---- @return True if a <= b.
 Bint.__le = function(a: BintArg, b: BintArg): boolean
 	return core.le(coerce(a), coerce(b))
 end
 
---- Convert to a decimal string.
---- @see bint.to_string
 Bint.__tostring = function(a: Bint): string
 	return bint.to_string(a)
 end
@@ -1860,9 +1819,6 @@ local function seek_pow10_limbs(exp: number): {number}
 	return pow10_cursor_limbs
 end
 
---- Return the number of decimal digits (metamethod for #).
---- @param a The Bint.
---- @return The number of decimal digits, or 0 for zero.
 Bint.__len = function(a: Bint): number
 	if a.signum == 0 then return 0 end
 	local limbs = a.limbs
@@ -1881,60 +1837,143 @@ Bint.__len = function(a: Bint): number
 end
 
 -- Convenience methods callable on Bint instances.
+--- Clone this Bint.
+--- @param self The source Bint.
+--- @return A new Bint equal to self.
 Bint.clone    = clone_bint
+--- Return the absolute value of this Bint.
+--- @see core.abs
 Bint.abs      = core.abs
+--- Return the negation of this Bint.
+--- @see core.neg
 Bint.neg      = core.neg
+--- Compare this Bint with another value.
+--- @param self Left operand.
+--- @param other Right operand (coerced from BintArg).
+--- @return -1 if self < other, 0 if self == other, 1 if self > other.
 Bint.cmp = function(self: Bint, other: BintArg): number
 	return core.cmp(self, coerce(other))
 end
+--- Test this Bint for equality with another value.
+--- @param self Left operand.
+--- @param other Right operand (coerced from BintArg).
+--- @return True if self == other.
 Bint.eq = function(self: Bint, other: BintArg): boolean
 	return core.eq(self, coerce(other))
 end
+--- Test if this Bint is strictly less than another value.
+--- @param self Left operand.
+--- @param other Right operand (coerced from BintArg).
+--- @return True if self < other.
 Bint.lt = function(self: Bint, other: BintArg): boolean
 	return core.lt(self, coerce(other))
 end
+--- Test if this Bint is less than or equal to another value.
+--- @param self Left operand.
+--- @param other Right operand (coerced from BintArg).
+--- @return True if self <= other.
 Bint.le = function(self: Bint, other: BintArg): boolean
 	return core.le(self, coerce(other))
 end
+--- Add another value to this Bint.
+--- @param self Left operand.
+--- @param other Right operand (coerced from BintArg).
+--- @return A new Bint equal to self + other.
 Bint.add = function(self: Bint, other: BintArg): Bint
 	return core.add(self, coerce(other))
 end
+--- Subtract another value from this Bint.
+--- @param self Left operand.
+--- @param other Right operand (coerced from BintArg).
+--- @return A new Bint equal to self - other.
 Bint.sub = function(self: Bint, other: BintArg): Bint
 	return core.sub(self, coerce(other))
 end
+--- Multiply this Bint by another value.
+--- @param self Left operand.
+--- @param other Right operand (coerced from BintArg).
+--- @return A new Bint equal to self * other.
 Bint.mul = function(self: Bint, other: BintArg): Bint
 	return core.mul(self, coerce(other))
 end
+--- Compute floor-division quotient and remainder with another value.
+--- @param self The dividend.
+--- @param other The divisor (coerced from BintArg).
+--- @return The quotient and remainder as new Bints.
 Bint.divmod = function(self: Bint, other: BintArg): (Bint, Bint)
 	return core.divmod(self, coerce(other))
 end
+--- Compute floor-division quotient with another value.
+--- @param self The dividend.
+--- @param other The divisor (coerced from BintArg).
+--- @return A new Bint equal to self // other.
 Bint.idiv = function(self: Bint, other: BintArg): Bint
 	return core.idiv(self, coerce(other))
 end
+--- Compute floor-division remainder with another value.
+--- @param self The dividend.
+--- @param other The divisor (coerced from BintArg).
+--- @return A new Bint equal to self % other.
 Bint.mod = function(self: Bint, other: BintArg): Bint
 	return core.mod(self, coerce(other))
 end
+--- Compute truncated-division quotient and remainder with another value.
+--- @param self The dividend.
+--- @param other The divisor (coerced from BintArg).
+--- @return The quotient and remainder as new Bints.
 Bint.tdivmod = function(self: Bint, other: BintArg): (Bint, Bint)
 	return core.tdivmod(self, coerce(other))
 end
+--- Compute truncated-division quotient with another value.
+--- @param self The dividend.
+--- @param other The divisor (coerced from BintArg).
+--- @return A new Bint equal to trunc(self / other).
 Bint.tdiv = function(self: Bint, other: BintArg): Bint
 	return core.tdiv(self, coerce(other))
 end
+--- Compute truncated-division remainder with another value.
+--- @param self The dividend.
+--- @param other The divisor (coerced from BintArg).
+--- @return A new Bint equal to self - trunc(self / other) * other.
 Bint.tmod = function(self: Bint, other: BintArg): Bint
 	return core.tmod(self, coerce(other))
 end
+--- Raise this Bint to another value's power.
+--- @param self The base.
+--- @param other The exponent (coerced from BintArg).
+--- @return A new Bint equal to self ^ other.
 Bint.pow = function(self: Bint, other: BintArg): Bint
 	return core.pow(self, coerce(other))
 end
+--- Compute integer square root of this Bint.
+--- @see core.sqrt
 Bint.sqrt			= core.sqrt
+--- Shift this Bint left by bits.
+--- @see core.lshift
 Bint.lshift			= core.lshift
+--- Shift this Bint right by bits (arithmetic, sign-preserving).
+--- @see core.rshift
 Bint.rshift			= core.rshift
+--- Shift this Bint left by limbs.
+--- @see core.lshift_words
 Bint.lshift_words	= core.lshift_words
+--- Shift this Bint right by limbs.
+--- @see core.rshift_words
 Bint.rshift_words	= core.rshift_words
+--- Convert this Bint to a string.
+--- @see bint.to_string
 Bint.to_string		= bint.to_string
+--- Convert this Bint to a Lua number.
+--- @see bint.to_number
 Bint.to_number		= bint.to_number
+--- Convert this Bint to lossy scientific notation.
+--- @see bint.to_sci
 Bint.to_sci			= bint.to_sci
+--- Serialize this Bint to little-endian bytes.
+--- @see bint.to_le
 Bint.to_le			= bint.to_le
+--- Serialize this Bint to big-endian bytes.
+--- @see bint.to_be
 Bint.to_be			= bint.to_be
 
 --# TUNING
@@ -1951,6 +1990,8 @@ type ThresholdConfig = {
 
 local tuning = {}
 
+--- Get current algorithm threshold configuration.
+--- @return A ThresholdConfig snapshot of active threshold values.
 function tuning.get_thresholds(): ThresholdConfig
 	return {
 		mul_split_thr = mulSplitThr,
@@ -1973,6 +2014,9 @@ local function expect_number(value: any, name: string): number
 	return value
 end
 
+--- Override algorithm threshold configuration.
+--- @param config Threshold values to apply.
+--- @raise An error if config is not a table or any threshold is invalid.
 function tuning.set_thresholds(config: ThresholdConfig)
 	if type(config) ~= "table" then
 		error("threshold config must be a table", 2)
@@ -2026,6 +2070,7 @@ function tuning.set_thresholds(config: ThresholdConfig)
 	burnikelOff = burnikelOffset
 end
 
+--- Restore all algorithm thresholds to library defaults.
 function tuning.reset_thresholds()
 	mulSplitThr = DEFAULT_MUL_SPLIT_THR
 	karatsubaThr = DEFAULT_KARATSUBA_THR
