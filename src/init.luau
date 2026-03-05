@@ -2129,6 +2129,10 @@ local helpers = {
 	add_signed = add_signed,
 }
 
+--- @internal
+--- Not part of the public API. Intended for debugging, benchmarking, and test
+--- infrastructure only. Contents are unstable and may change in any release
+--- without notice. Do not depend on this in production code.
 local internals = {
 	algorithms = algorithms,
 	helpers = helpers,

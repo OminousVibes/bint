@@ -120,6 +120,7 @@ interface BintTuning {
 	reset_thresholds(): void;
 }
 
+/** @internal */
 interface BintHelpers {
 	/** Mutates `limbs` in place by removing trailing zero limbs. */
 	strip_zeros(limbs: LimbArray): void;
@@ -145,6 +146,7 @@ interface BintHelpers {
 	add_signed(al: LimbArray, as: Signum, bl: LimbArray, bs: Signum): LuaTuple<[LimbArray, Signum]>;
 }
 
+/** @internal */
 interface BintAlgorithms {
 	mul_schoolbook(a: Bint, b: Bint): Bint;
 	mul_schoolbook_split(a: Bint, b: Bint): Bint;
@@ -157,6 +159,7 @@ interface BintAlgorithms {
 	sqrt_karatsuba(n: Bint): Bint;
 }
 
+/** @internal */
 interface BintInternals {
 	algorithms: BintAlgorithms;
 	helpers: BintHelpers;
@@ -174,7 +177,10 @@ export const bint: BintModule;
  *  accepts `BintArg` (Bint, number, or string). */
 export const core: BintCore;
 
-/** Advanced, unstable internals for low-level algorithm and limb-helper access. */
+/**
+ * Advanced, unstable internals for low-level algorithm and limb-helper access.
+ * @internal
+ */
 export const internals: BintInternals;
 
 /** Runtime tuning for algorithm dispatch crossover points and Burnikel-Ziegler leaf sizing. */
