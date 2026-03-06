@@ -158,12 +158,14 @@ export type Bint = typeof(setmetatable({} :: BintData, {} :: BintMetatable))
 -- Private, unsigned. Operate on raw {number} arrays.
 
 -- Remove trailing zero limbs (leading zeros in big-endian view).
-local function strip_zeros(limbs: {number})
-	while true do
-		local n = #limbs
-		if n == 0 or limbs[n] ~= 0 then break end
+-- Returns the resulting array length.
+local function strip_zeros(limbs: {number}, len: number?): number
+	local n = len or #limbs
+	while n > 0 and limbs[n] == 0 do
 		limbs[n] = nil
+		n -= 1
 	end
+	return n
 end
 
 -- Multiply every limb by a single integer d; returns a new array.
@@ -961,15 +963,16 @@ local function from_string_dec(str: string, negative: boolean): Bint
 	end
 
 	local out: {number} = {}
-	while #chunks > 0 do
+	local chunksLen = #chunks
+	while chunksLen > 0 do
 		local carry = 0
-		for i = #chunks, 1, -1 do
+		for i = chunksLen, 1, -1 do
 			local val = chunks[i] + carry * RADIX_CHUNK
 			chunks[i] = floor(val / BASE)
 			carry = val % BASE
 		end
 		tinsert(out, carry)
-		strip_zeros(chunks)
+		chunksLen = strip_zeros(chunks, chunksLen)
 	end
 
 	return from_raw(out, negative and -1 or 1)
@@ -1648,20 +1651,21 @@ function bint.to_string(a: Bint, base: number?): string
 	if b == 10 then
 		-- Chunked base-2^24 → 10^8 conversion.
 		local clone = tclone(limbs)
-		local chunk_count = ceil(#clone * log10(BASE) / floor(log10(RADIX_CHUNK)))
+		local cloneLen = #clone
+		local chunk_count = ceil(cloneLen * log10(BASE) / floor(log10(RADIX_CHUNK)))
 		local chunks: {string} = tcreate(chunk_count, "") :: {string}
 		local idx = chunk_count
-		while #clone > 0 do
+		while cloneLen > 0 do
 			local carry = 0
-			for i = #clone, 1, -1 do
+			for i = cloneLen, 1, -1 do
 				local val = clone[i] + carry * BASE
 				carry = val % RADIX_CHUNK
 				clone[i] = floor(val / RADIX_CHUNK)
 			end
 			chunks[idx] = sformat("%08d", carry)
 			idx -= 1
-				strip_zeros(clone)
-			end
+			cloneLen = strip_zeros(clone, cloneLen)
+		end
 		-- remove leading zeros from the first chunk
 		local str = tconcat(chunks):gsub("^0+", "")
 		return prefix .. str
